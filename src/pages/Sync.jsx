@@ -207,13 +207,6 @@ export default function Sync() {
         {syncError && (
           <div className="share-sync-error" role="alert">
             {syncError}
-            {syncError.includes('permission') && (
-              <span>
-                {' '}
-                Try Firebase Console → App Check → set Firestore to Monitor (not Enforce), then run{' '}
-                <code>firebase deploy --only firestore:rules</code>.
-              </span>
-            )}
           </div>
         )}
 

@@ -14,31 +14,28 @@ function greeting(h) {
 }
 
 export default function Home() {
-  const { events, selectedDate, showToast } = useApp()
+  const { events, showToast } = useApp()
   const [addOpen, setAddOpen] = useState(false)
 
-  const todayKey = dateKey(selectedDate)
-  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes()
-  const isToday = dateKey(new Date()) === todayKey
+  const today = new Date()
+  const todayKey = dateKey(today)
+  const nowMinutes = today.getHours() * 60 + today.getMinutes()
 
   const todays = useMemo(
-    () => eventsForDay(events, selectedDate).sort((a, b) => a.start - b.start),
-    [events, selectedDate],
+    () => eventsForDay(events, today).sort((a, b) => a.start - b.start),
+    [events, todayKey],
   )
 
-  const upNext = useMemo(() => {
-    const future = isToday ? todays.filter((e) => e.end >= nowMinutes) : todays
-    return future
-  }, [todays, isToday, nowMinutes])
+  const upNext = useMemo(() => todays.filter((e) => e.end >= nowMinutes), [todays, nowMinutes])
 
   const nextEvent = upNext[0]
 
   return (
     <div className="page">
       <div className="home-page">
-        <div className="home-greeting">{greeting(new Date().getHours())} </div>
+        <div className="home-greeting">{greeting(today.getHours())} </div>
         <div className="home-sub">
-          {WEEKDAYS[selectedDate.getDay()]}, {MONTHS[selectedDate.getMonth()]} {selectedDate.getDate()}
+          {WEEKDAYS[today.getDay()]}, {MONTHS[today.getMonth()]} {today.getDate()}
         </div>
 
         <div className="home-section-title">Up next</div>
@@ -52,7 +49,7 @@ export default function Home() {
             </div>
           </div>
         ) : (
-          <div className="home-empty">{isToday ? 'Nothing left today 🎉' : 'No events this day'}</div>
+          <div className="home-empty">Nothing left today 🎉</div>
         )}
 
         {upNext.length > 1 && (
