@@ -18,11 +18,6 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
   const [repeat, setRepeat] = useState(editing?.repeat ?? false)
   const [notes, setNotes] = useState(editing?.notes ?? '')
 
-  const applyPreset = (preset) => {
-    if (!title || colors.some((c) => c.label === title)) setTitle(preset.label)
-    setColor(preset.color)
-  }
-
   const snapTime = (value) => minutesToTimeString(snapMinutes(timeStringToMinutes(value)))
 
   const handleSave = async () => {
@@ -59,21 +54,6 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>{isEdit ? 'Edit event' : 'New event'}</h3>
-
-        <label>Quick add</label>
-        <div className="preset-row">
-          {colors.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              className={`preset-chip${color === preset.color && title === preset.label ? ' selected' : ''}`}
-              onClick={() => applyPreset(preset)}
-            >
-              <span className="swatch" style={{ background: preset.color }} />
-              {preset.label}
-            </button>
-          ))}
-        </div>
 
         <label>Title</label>
         <input

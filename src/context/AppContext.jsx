@@ -25,6 +25,7 @@ const AppContext = createContext(null)
 const STORAGE_KEY = 'calendar-events'
 const SETTINGS_KEY = 'calendar-settings'
 const THEME_KEY = 'calendar-theme'
+const VIEW_KEY = 'calendar-view'
 
 // Legacy events stored a named category; map it to a hex color.
 const CATEGORY_TO_COLOR = { pink: '#c2447a', purple: '#8b6fc9', yellow: '#d9a73d' }
@@ -58,6 +59,7 @@ function loadSettings() {
 export function AppProvider({ children }) {
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || 'light')
   const [selectedDate, setSelectedDate] = useState(() => new Date())
+  const [calendarView, setCalendarView] = useState(() => localStorage.getItem(VIEW_KEY) || 'day')
   const [settings, setSettings] = useState(loadSettings)
   const [events, setEvents] = useState([])
   const [user, setUser] = useState(null)
@@ -77,6 +79,14 @@ export function AppProvider({ children }) {
   const toggleTheme = useCallback(() => {
     setTheme((t) => (t === 'dark' ? 'light' : 'dark'))
   }, [])
+
+  const toggleCalendarView = useCallback(() => {
+    setCalendarView((v) => (v === 'day' ? 'week' : 'day'))
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(VIEW_KEY, calendarView)
+  }, [calendarView])
 
   // --- Settings persistence ---
   useEffect(() => {
@@ -203,6 +213,9 @@ export function AppProvider({ children }) {
       toggleTheme,
       selectedDate,
       setSelectedDate,
+      calendarView,
+      setCalendarView,
+      toggleCalendarView,
       settings,
       addColor,
       updateColor,
@@ -222,7 +235,7 @@ export function AppProvider({ children }) {
       toast,
       showToast,
     }),
-    [theme, toggleTheme, selectedDate, settings, addColor, updateColor, deleteColor, events, addEvent, updateEvent, deleteEvent, user, authLoading, signInWithGoogle, signInWithApple, signOut, syncState, lastSynced, toast, showToast],
+    [theme, toggleTheme, selectedDate, calendarView, setCalendarView, toggleCalendarView, settings, addColor, updateColor, deleteColor, events, addEvent, updateEvent, deleteEvent, user, authLoading, signInWithGoogle, signInWithApple, signOut, syncState, lastSynced, toast, showToast],
   )
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>

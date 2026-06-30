@@ -77,3 +77,21 @@ export function gridHours() {
   for (let h = GRID_START_HOUR; h <= GRID_END_HOUR; h++) hours.push(h)
   return hours
 }
+
+export const WEEK_ROW_H = 28 // px per hour in week overview
+
+const MONTHS_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+export function monthLabel(date) {
+  return `${MONTHS_FULL[date.getMonth()]} ${date.getFullYear()}`
+}
+
+/** 42-day grid (6 weeks) for a month picker, Sunday-first. */
+export function monthGrid(date) {
+  const first = new Date(date.getFullYear(), date.getMonth(), 1)
+  const start = addDays(first, -first.getDay())
+  return Array.from({ length: 42 }, (_, i) => addDays(start, i))
+}
+
+export function sameDay(a, b) {
+  return dateKey(a) === dateKey(b)
+}

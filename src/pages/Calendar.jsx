@@ -1,7 +1,9 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import AddEventModal from '../components/AddEventModal.jsx'
-import { EditIcon, PlusIcon, RepeatIcon } from '../components/icons.jsx'
+import EventDetailModal from '../components/EventDetailModal.jsx'
+import WeekCalendar from '../components/WeekCalendar.jsx'
+import { PlusIcon, RepeatIcon } from '../components/icons.jsx'
 import { layoutEvents } from '../lib/layout.js'
 import { colorFill } from '../lib/settings.js'
 import {
@@ -24,8 +26,9 @@ const LONG_PRESS_MS = 320
 const MOVE_CANCEL_PX = 8
 
 export default function Calendar() {
-  const { events, selectedDate, setSelectedDate, settings, updateEvent, showToast } = useApp()
+  const { events, selectedDate, setSelectedDate, settings, updateEvent, showToast, calendarView, setCalendarView } = useApp()
   const [modalOpen, setModalOpen] = useState(false)
+  const [viewing, setViewing] = useState(null)
   const [editing, setEditing] = useState(null)
   const [newSlot, setNewSlot] = useState(null) // { start, end } when adding from grid tap
   const [resizeId, setResizeId] = useState(null)
@@ -96,14 +99,25 @@ export default function Calendar() {
   const openNew = (slot) => {
     setResizeId(null)
     setMoveId(null)
+    setViewing(null)
     setEditing(null)
     setNewSlot(slot ?? null)
     setModalOpen(true)
   }
 
+  const openDetail = (ev) => {
+    setResizeId(null)
+    setMoveId(null)
+    setViewing(ev)
+    setEditing(null)
+    setNewSlot(null)
+    setModalOpen(false)
+  }
+
   const openEdit = (ev) => {
     setResizeId(null)
     setMoveId(null)
+    setViewing(null)
     setEditing(ev)
     setNewSlot(null)
     setModalOpen(true)
@@ -117,7 +131,7 @@ export default function Calendar() {
     openNew(yToHourSlot(e.clientY))
   }
 
-  // Short tap -> edit. Hold without moving -> resize handles on release.
+  // Short tap -> detail view. Hold without moving -> resize handles on release.
   // Hold and drag (finger still down) -> move the whole block.
   const onEventPointerDown = (e, ev) => {
     e.stopPropagation()
@@ -170,7 +184,10 @@ export default function Calendar() {
       if (me.pointerId !== session.pointerId) return
       cleanup()
 
-      if (!session.longPressed) return
+      if (!session.longPressed) {
+        if (!session.cancelled) openDetail(ev)
+        return
+      }
 
       if (session.moved) {
         const next = shiftEvent(session.origStart, session.origEnd, me.clientY - session.startY)
@@ -232,22 +249,36 @@ export default function Calendar() {
 
   return (
     <div className="page">
-      <div className="week-strip">
-        {week.map((d) => {
-          const active = dateKey(d) === selectedKey
-          return (
-            <button
-              key={dateKey(d)}
-              className={`day-col${active ? ' active' : ''}`}
-              onClick={() => setSelectedDate(new Date(d))}
-            >
-              <div className="dow">{dowLabel(d)}</div>
-              <div className="dom">{d.getDate()}</div>
-            </button>
-          )
-        })}
-      </div>
+      {calendarView === 'day' && (
+        <div className="week-strip">
+          {week.map((d) => {
+            const active = dateKey(d) === selectedKey
+            return (
+              <button
+                key={dateKey(d)}
+                className={`day-col${active ? ' active' : ''}`}
+                onClick={() => setSelectedDate(new Date(d))}
+              >
+                <div className="dow">{dowLabel(d)}</div>
+                <div className="dom">{d.getDate()}</div>
+              </button>
+            )
+          })}
+        </div>
+      )}
 
+      {calendarView === 'week' ? (
+        <WeekCalendar
+          events={events}
+          week={week}
+          selectedDate={selectedDate}
+          onSelectDay={(day) => {
+            setSelectedDate(new Date(day))
+            setCalendarView('day')
+          }}
+          onEventClick={openDetail}
+        />
+      ) : (
       <div className="grid-wrap" ref={gridRef}>
         {hours.map((h) => (
           <div className="time-row" key={h}>
@@ -286,30 +317,12 @@ export default function Calendar() {
                     onPointerDown={(e) => startHandleDrag(e, ev, 'top')}
                   />
                 )}
-                <button
-                  type="button"
-                  className="event-edit-btn"
-                  aria-label="Edit event"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    openEdit(ev)
-                  }}
-                >
-                  <EditIcon />
-                </button>
-                {ev.notes?.trim() ? (
-                  <div className="notes">{ev.notes.trim()}</div>
-                ) : (
-                  <>
-                    <div className="title">
-                      {ev.title}
-                      {ev.repeat && <RepeatIcon className="repeat-icon" />}
-                    </div>
-                    {(height > 30 || isResizing || isMoving) && (
-                      <div className="time">{formatRange(live.start, live.end)}</div>
-                    )}
-                  </>
+                <div className="title">
+                  {ev.title}
+                  {ev.repeat && <RepeatIcon className="repeat-icon" />}
+                </div>
+                {(height > 30 || isResizing || isMoving) && (
+                  <div className="time">{formatRange(live.start, live.end)}</div>
                 )}
                 {isResizing && (
                   <div
@@ -322,10 +335,19 @@ export default function Calendar() {
           })}
         </div>
       </div>
+      )}
 
       <button className="fab" onClick={() => openNew()} aria-label="Add event">
         <PlusIcon />
       </button>
+
+      {viewing && (
+        <EventDetailModal
+          event={viewing}
+          onClose={() => setViewing(null)}
+          onEdit={() => openEdit(viewing)}
+        />
+      )}
 
       {modalOpen && (
         <AddEventModal
