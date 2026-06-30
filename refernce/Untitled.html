@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calendar Clone</title>
+<style>
+  :root{
+    --row-h: 60px;
+  }
+
+  /* DARK THEME (default) */
+  body.dark{
+    --bg: #000000;
+    --bg-card: #0a0a0a;
+    --line: #2a2a2a;
+    --text: #e8e8e8;
+    --text-dim: #9a9a9a;
+    --accent: #2ec4b6;
+    --pink: #5a3344;       --pink-border: #c2447a;
+    --purple: #4a3a5a;     --purple-border: #8b6fc9;
+    --yellow: #5a4a2a;     --yellow-border: #d9a73d;
+    --nav-bg: #0a0a0a;
+    --shadow: rgba(0,0,0,.4);
+  }
+
+  /* LIGHT THEME */
+  body.light{
+    --bg: #ffffff;
+    --bg-card: #ffffff;
+    --line: #e3e3e3;
+    --text: #2c2c2c;
+    --text-dim: #8a8a8a;
+    --accent: #00b3a4;
+    --pink: #fbdce6;       --pink-border: #e0457f;
+    --purple: #e6dcfb;     --purple-border: #8b6fc9;
+    --yellow: #fdeec2;     --yellow-border: #e0a72e;
+    --nav-bg: #fafafa;
+    --shadow: rgba(0,0,0,.15);
+  }
+
+  *{ box-sizing:border-box; margin:0; padding:0; }
+
+  html,body{ height:100%; }
+
+  body{
+    background:#1a1a1a;
+    display:flex;
+    justify-content:center;
+    align-items:flex-start;
+    padding:30px 0;
+    font-family:'Roboto','Segoe UI',Arial,sans-serif;
+    transition:background .3s;
+  }
+
+  .phone{
+    width:375px;
+    height:760px;
+    background:var(--bg);
+    border-radius:28px;
+    overflow:hidden;
+    box-shadow:0 0 0 8px #0a0a0a, 0 20px 50px rgba(0,0,0,.5);
+    display:flex;
+    flex-direction:column;
+    position:relative;
+    transition:background .3s, color .3s;
+  }
+
+  /* Status bar */
+  .status-bar{
+    height:26px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 14px;
+    font-size:12px;
+    color:var(--text);
+    background:var(--bg);
+    flex-shrink:0;
+  }
+  .status-bar .icons{ display:flex; gap:5px; align-items:center; }
+
+  /* Top app bar */
+  .app-bar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:8px 12px;
+    background:var(--bg);
+    flex-shrink:0;
+    border-bottom:1px solid transparent;
+  }
+  .app-bar .left{ display:flex; align-items:center; gap:14px; }
+  .app-bar .menu-icon{ width:22px; height:16px; display:flex; flex-direction:column; justify-content:space-between; cursor:pointer; }
+  .app-bar .menu-icon span{ height:2px; background:var(--text); border-radius:2px; }
+
+  .date-select{ display:flex; align-items:center; gap:6px; font-size:19px; color:var(--text); font-weight:400; cursor:pointer; user-select:none; }
+  .date-select svg{ width:14px; height:14px; fill:var(--text-dim); }
+
+  .app-bar .right{ display:flex; align-items:center; gap:16px; }
+  .app-bar .right svg{ width:20px; height:20px; fill:var(--text-dim); cursor:pointer; transition:fill .2s; }
+  .app-bar .right svg:hover{ fill:var(--accent); }
+
+  .theme-toggle{
+    width:36px; height:20px;
+    border-radius:12px;
+    background:var(--line);
+    position:relative;
+    cursor:pointer;
+    flex-shrink:0;
+  }
+  .theme-toggle .knob{
+    position:absolute; top:2px; left:2px;
+    width:16px; height:16px;
+    border-radius:50%;
+    background:var(--accent);
+    transition:left .25s;
+    display:flex; align-items:center; justify-content:center;
+    font-size:10px;
+  }
+  body.light .theme-toggle .knob{ left:18px; }
+
+  /* Week strip */
+  .week-strip{
+    display:flex;
+    border-bottom:1px solid var(--line);
+    flex-shrink:0;
+  }
+  .day-col{
+    flex:1;
+    text-align:center;
+    padding:6px 0 8px;
+    color:var(--text-dim);
+    font-size:11px;
+    position:relative;
+    cursor:pointer;
+  }
+  .day-col .dow{ letter-spacing:.5px; margin-bottom:4px; opacity:.8; }
+  .day-col .dom{
+    font-size:15px;
+    color:var(--text);
+    width:26px;
+    height:26px;
+    line-height:26px;
+    margin:0 auto;
+    border-radius:50%;
+    transition:background .2s, color .2s;
+  }
+  .day-col.active .dom{
+    background:transparent;
+    border:1.5px solid var(--accent);
+    color:var(--accent);
+  }
+  .day-col.active .dow{ color:var(--accent); }
+  .day-col:hover .dom{ background:var(--line); }
+
+  /* Pages */
+  .page{ display:none; flex:1; min-height:0; flex-direction:column; }
+  .page.visible{ display:flex; }
+
+  /* ---- CALENDAR PAGE ---- */
+  .grid-wrap{
+    flex:1;
+    overflow-y:auto;
+    position:relative;
+    background:var(--bg);
+  }
+  .grid-wrap::-webkit-scrollbar{ width:0; }
+
+  .time-row{
+    display:flex;
+    border-top:1px solid var(--line);
+    min-height:var(--row-h);
+    position:relative;
+  }
+  .time-label{
+    width:54px;
+    flex-shrink:0;
+    font-size:11px;
+    color:var(--text-dim);
+    padding:4px 8px 0 0;
+    text-align:right;
+  }
+  .time-content{
+    flex:1;
+    position:relative;
+    border-left:1px solid var(--line);
+    padding:3px 6px;
+  }
+
+  .event{
+    position:absolute;
+    border-left:3px solid;
+    border-radius:3px;
+    padding:3px 8px 4px;
+    font-size:12px;
+    color:var(--text);
+    overflow:hidden;
+    box-sizing:border-box;
+    cursor:pointer;
+    transition:filter .15s, transform .1s;
+  }
+  .event:hover{ filter:brightness(1.15); }
+  .event:active{ transform:scale(0.98); }
+  .event .title{
+    font-weight:600;
+    font-size:12.5px;
+    display:flex;
+    align-items:center;
+    gap:5px;
+    text-transform:uppercase;
+    letter-spacing:.2px;
+  }
+  .event .time{
+    font-size:11px;
+    color:var(--text-dim);
+    margin-top:2px;
+  }
+  .event .repeat-icon{ width:12px; height:12px; fill:var(--text-dim); flex-shrink:0; order:2; }
+
+  .event.pink{ background:var(--pink); border-color:var(--pink-border); }
+  .event.purple{ background:var(--purple); border-color:var(--purple-border); }
+  .event.yellow{ background:var(--yellow); border-color:var(--yellow-border); }
+
+  .fab{
+    position:absolute;
+    bottom:70px;
+    right:18px;
+    width:48px;
+    height:48px;
+    border-radius:50%;
+    background:var(--accent);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    box-shadow:0 4px 10px var(--shadow);
+    cursor:pointer;
+    z-index:5;
+    transition:transform .15s;
+  }
+  .fab:hover{ transform:scale(1.07); }
+  .fab:active{ transform:scale(0.95); }
+  .fab svg{ width:22px; height:22px; fill:#fff; }
+
+  /* ---- HOME PAGE ---- */
+  .home-page{ flex:1; overflow-y:auto; padding:20px 18px; color:var(--text); }
+  .home-greeting{ font-size:22px; font-weight:600; margin-bottom:4px; }
+  .home-sub{ font-size:13px; color:var(--text-dim); margin-bottom:20px; }
+  .home-stats{ display:flex; gap:10px; margin-bottom:22px; }
+  .stat-card{
+    flex:1;
+    background:var(--bg-card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:14px;
+    text-align:center;
+  }
+  .stat-card .num{ font-size:22px; font-weight:700; color:var(--accent); }
+  .stat-card .label{ font-size:11px; color:var(--text-dim); margin-top:4px; }
+  .home-section-title{ font-size:14px; font-weight:600; margin-bottom:10px; text-transform:uppercase; letter-spacing:.4px; color:var(--text-dim); }
+  .home-event-item{
+    display:flex; align-items:center; gap:10px;
+    padding:10px 12px;
+    border-radius:10px;
+    background:var(--bg-card);
+    border:1px solid var(--line);
+    margin-bottom:8px;
+    cursor:pointer;
+    transition:filter .15s;
+  }
+  .home-event-item:hover{ filter:brightness(1.1); }
+  .home-event-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .home-event-item .etext{ flex:1; }
+  .home-event-item .etitle{ font-size:13px; font-weight:600; }
+  .home-event-item .etime{ font-size:11px; color:var(--text-dim); }
+
+  /* ---- MAP PAGE ---- */
+  .map-page{ flex:1; position:relative; overflow:hidden; }
+  .map-canvas{
+    position:absolute; inset:0;
+    background:
+      repeating-linear-gradient(0deg, var(--line) 0 1px, transparent 1px 40px),
+      repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 40px),
+      var(--bg-card);
+  }
+  .map-pin{
+    position:absolute;
+    width:30px; height:30px;
+    transform:translate(-50%,-100%);
+    cursor:pointer;
+  }
+  .map-pin svg{ width:100%; height:100%; filter:drop-shadow(0 2px 3px var(--shadow)); }
+  .map-pin.p1 svg{ fill:#e0457f; }
+  .map-pin.p2 svg{ fill:#8b6fc9; }
+  .map-pin.p3 svg{ fill:#d9a73d; }
+  .map-pin .pin-label{
+    position:absolute; top:-22px; left:50%; transform:translateX(-50%);
+    background:var(--bg-card); border:1px solid var(--line); color:var(--text);
+    font-size:10px; padding:2px 6px; border-radius:4px; white-space:nowrap;
+    opacity:0; pointer-events:none; transition:opacity .15s;
+  }
+  .map-pin:hover .pin-label{ opacity:1; }
+  .map-controls{
+    position:absolute; right:14px; bottom:90px;
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .map-btn{
+    width:36px; height:36px; border-radius:8px;
+    background:var(--bg-card); border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; box-shadow:0 2px 6px var(--shadow);
+  }
+  .map-btn svg{ width:18px; height:18px; fill:var(--text); }
+
+  /* ---- SYNC PAGE ---- */
+  .sync-page{ flex:1; overflow-y:auto; padding:20px 18px; color:var(--text); }
+  .sync-status{
+    display:flex; flex-direction:column; align-items:center;
+    padding:30px 0 20px;
+  }
+  .sync-circle{
+    width:90px; height:90px; border-radius:50%;
+    border:3px solid var(--accent);
+    display:flex; align-items:center; justify-content:center;
+    margin-bottom:14px;
+    transition:transform .6s ease;
+  }
+  .sync-circle.spinning{ animation:spin 1s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .sync-circle svg{ width:38px; height:38px; fill:var(--accent); }
+  .sync-status .label{ font-size:14px; font-weight:600; }
+  .sync-status .sub{ font-size:12px; color:var(--text-dim); margin-top:4px; }
+  .sync-btn{
+    display:block; margin:0 auto 24px;
+    background:var(--accent); color:#fff; border:none;
+    padding:10px 22px; border-radius:20px; font-size:13px; font-weight:600;
+    cursor:pointer;
+  }
+  .sync-btn:active{ transform:scale(0.97); }
+  .sync-list-item{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:12px 0; border-bottom:1px solid var(--line);
+    font-size:13px;
+  }
+  .sync-list-item .name{ font-weight:600; }
+  .sync-list-item .time{ color:var(--text-dim); font-size:11px; }
+  .sync-list-item .ok{ color:var(--accent); font-size:11px; }
+
+  /* Bottom nav */
+  .bottom-nav{
+    display:flex;
+    justify-content:space-around;
+    align-items:center;
+    padding:8px 0 10px;
+    background:var(--nav-bg);
+    border-top:1px solid var(--line);
+    flex-shrink:0;
+  }
+  .nav-item{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:3px;
+    color:var(--text-dim);
+    font-size:10px;
+    cursor:pointer;
+    transition:color .15s;
+    user-select:none;
+  }
+  .nav-item svg{ width:20px; height:20px; fill:var(--text-dim); transition:fill .15s; }
+  .nav-item.active{ color:var(--accent); }
+  .nav-item.active svg{ fill:var(--accent); }
+  .nav-item:hover{ color:var(--accent); }
+  .nav-item:hover svg{ fill:var(--accent); }
+
+  /* Toast */
+  .toast{
+    position:absolute; bottom:80px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--bg-card); border:1px solid var(--line); color:var(--text);
+    padding:10px 16px; border-radius:8px; font-size:12px;
+    box-shadow:0 4px 12px var(--shadow);
+    opacity:0; pointer-events:none; transition:opacity .25s, transform .25s;
+    z-index:50; max-width:80%; text-align:center;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body class="dark">
+
+<div class="phone">
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <span id="clock">8:43</span>
+    <div class="icons">
+      <span>📶</span><span>🔋</span>
+    </div>
+  </div>
+
+  <!-- App bar -->
+  <div class="app-bar">
+    <div class="left">
+      <div class="menu-icon"><span></span><span></span><span></span></div>
+      <div class="date-select" id="dateSelect">
+        Feb 28
+        <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+      </div>
+    </div>
+    <div class="right">
+      <svg id="searchIcon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.51 6.51 0 001.48-5.34c-.47-2.78-2.79-5-5.59-5.34a6.505 6.505 0 00-7.27 7.27c.34 2.8 2.56 5.12 5.34 5.59a6.51 6.51 0 005.34-1.48l.27.28v.79l4.25 4.25c.41.41 1.08.41 1.49 0 .41-.41.41-1.08 0-1.49L15.5 14zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <div class="theme-toggle" id="themeToggle"><div class="knob">☀</div></div>
+    </div>
+  </div>
+
+  <!-- ===================== HOME PAGE ===================== -->
+  <div class="page" id="page-home">
+    <div class="home-page">
+      <div class="home-greeting">Good afternoon 👋</div>
+      <div class="home-sub">Sunday, February 28</div>
+
+      <div class="home-stats">
+        <div class="stat-card"><div class="num">8</div><div class="label">Events today</div></div>
+        <div class="stat-card"><div class="num">3</div><div class="label">Contacts</div></div>
+        <div class="stat-card"><div class="num">✓</div><div class="label">Synced</div></div>
+      </div>
+
+      <div class="home-section-title">Up next</div>
+      <div class="home-event-item" data-target="page-calendar">
+        <div class="home-event-dot" style="background:var(--pink-border)"></div>
+        <div class="etext"><div class="etitle">Sacrament Meeting</div><div class="etime">1:00 – 2:00 PM</div></div>
+      </div>
+      <div class="home-event-item" data-target="page-calendar">
+        <div class="home-event-dot" style="background:var(--purple-border)"></div>
+        <div class="etext"><div class="etitle">Companionship Study</div><div class="etime">3:00 – 4:00 PM</div></div>
+      </div>
+      <div class="home-event-item" data-target="page-calendar">
+        <div class="home-event-dot" style="background:var(--yellow-border)"></div>
+        <div class="etext"><div class="etitle">David</div><div class="etime">4:00 – 4:30 PM</div></div>
+      </div>
+
+      <div class="home-section-title" style="margin-top:18px;">Quick actions</div>
+      <div class="home-event-item" data-target="page-map"><div class="home-event-dot" style="background:var(--accent)"></div><div class="etext"><div class="etitle">View today's map</div><div class="etime">3 visits planned</div></div></div>
+      <div class="home-event-item" data-target="page-sync"><div class="home-event-dot" style="background:var(--accent)"></div><div class="etext"><div class="etitle">Sync calendar</div><div class="etime">Last synced 2 min ago</div></div></div>
+    </div>
+  </div>
+
+  <!-- ===================== CALENDAR PAGE ===================== -->
+  <div class="page visible" id="page-calendar">
+    <!-- Week strip -->
+    <div class="week-strip">
+      <div class="day-col"><div class="dow">FRI</div><div class="dom">26</div></div>
+      <div class="day-col"><div class="dow">SAT</div><div class="dom">27</div></div>
+      <div class="day-col active"><div class="dow">SUN</div><div class="dom">28</div></div>
+      <div class="day-col"><div class="dow">MON</div><div class="dom">1</div></div>
+      <div class="day-col"><div class="dow">TUE</div><div class="dom">2</div></div>
+      <div class="day-col"><div class="dow">WED</div><div class="dom">3</div></div>
+      <div class="day-col"><div class="dow">THU</div><div class="dom">4</div></div>
+    </div>
+
+    <!-- Time grid -->
+    <div class="grid-wrap" id="gridWrap">
+      <div class="time-row"><div class="time-label">12 PM</div><div class="time-content"></div></div>
+
+      <div class="time-row" style="min-height:50px;">
+        <div class="time-label"></div>
+        <div class="time-content">
+          <div class="event pink" style="top:0; left:0; right:0; height:44px;" data-title="Sunday School" data-time="11:40 AM – 12:30 PM">
+            <div class="title">SUNDAY SCHOOL <svg class="repeat-icon" viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 13c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 8.74A7.93 7.93 0 004 13c0 4.42 3.58 8 8 8v4l5-5-5-5v4z"/></svg></div>
+            <div class="time">11:40 AM – 12:30 PM</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="time-row">
+        <div class="time-label">1 PM</div>
+        <div class="time-content">
+          <div class="event pink" style="top:0; left:0; width:60%; height:108px;" data-title="Sacrament Meeting" data-time="1:00 – 2:00 PM">
+            <div class="title">SACRAMENT MEETING <svg class="repeat-icon" viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 13c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 8.74A7.93 7.93 0 004 13c0 4.42 3.58 8 8 8v4l5-5-5-5v4z"/></svg></div>
+          </div>
+          <div class="event purple" style="top:30px; left:0; width:55%; height:78px;" data-title="Almuerzo" data-time="1:15 – 2:00 PM">
+            <div class="title">ALMUERZO <svg class="repeat-icon" viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 13c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 8.74A7.93 7.93 0 004 13c0 4.42 3.58 8 8 8v4l5-5-5-5v4z"/></svg></div>
+            <div class="time">1:15 – 2:00 PM</div>
+          </div>
+          <div class="event purple" style="top:0; left:62%; right:0; height:60px;" data-title="T-Charts" data-time="1:00 – 2:00 PM">
+            <div class="title">T-CHARTS <svg class="repeat-icon" viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 13c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 8.74A7.93 7.93 0 004 13c0 4.42 3.58 8 8 8v4l5-5-5-5v4z"/></svg></div>
+            <div class="time">1:00 – 2:00 PM</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="time-row">
+        <div class="time-label">2 PM</div>
+        <div class="time-content">
+          <div class="event purple" style="top:0; left:0; right:0; height:50px;" data-title="Estudio de Idioma" data-time="2:00 – 3:00 PM">
+            <div class="title">ESTUDIO DE IDIOMA <svg class="repeat-icon" viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 13c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 8.74A7.93 7.93 0 004 13c0 4.42 3.58 8 8 8v4l5-5-5-5v4z"/></svg></div>
+            <div class="time">2:00 – 3:00 PM</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="time-row">
+        <div class="time-label">3 PM</div>
+        <div class="time-content">
+          <div class="event purple" style="top:0; left:0; right:0; height:50px;" data-title="Companionship Study" data-time="3:00 – 4:00 PM">
+            <div class="title">COMPANIONSHIP STUDY <svg class="repeat-icon" viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 13c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 8.74A7.93 7.93 0 004 13c0 4.42 3.58 8 8 8v4l5-5-5-5v4z"/></svg></div>
+            <div class="time">3:00 – 4:00 PM</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="time-row">
+        <div class="time-label">4 PM</div>
+        <div class="time-content">
+          <div class="event yellow" style="top:0; left:0; right:0; height:36px;" data-title="David" data-time="4:00 – 4:30 PM">
+            <div class="title">DAVID</div><div class="time" style="display:inline; margin-left:6px;">4:00 – 4:30 PM</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="time-row">
+        <div class="time-label">5 PM</div>
+        <div class="time-content">
+          <div class="event yellow" style="top:0; left:0; right:0; height:36px;" data-title="Jesus" data-time="5:00 – 5:30 PM">
+            <div class="title">JESUS</div><div class="time" style="display:inline; margin-left:6px;">5:00 – 5:30 PM</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="time-row">
+        <div class="time-label">6 PM</div>
+        <div class="time-content">
+          <div class="event yellow" style="top:0; left:0; right:0; height:36px;" data-title="Karina, Refugio" data-time="6:00 – 6:30 PM">
+            <div class="title">KARINA, REFUGIO</div><div class="time" style="display:inline; margin-left:6px;">6:00 – 6:30 PM</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="time-row">
+        <div class="time-label">7 PM</div>
+        <div class="time-content">
+          <div class="event yellow" style="top:0; left:0; right:0; height:36px;" data-title="Uncle" data-time="6:30 – 7:00 PM">
+            <div class="title">UNCLE</div><div class="time" style="display:inline; margin-left:6px;">6:30 – 7:00 PM</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="time-row">
+        <div class="time-label">8 PM</div>
+        <div class="time-content">
+          <div class="event yellow" style="top:0; left:0; right:0; height:36px;" data-title="Carlos" data-time="7:30 – 8:00 PM">
+            <div class="title">CARLOS</div><div class="time" style="display:inline; margin-left:6px;">7:30 – 8:00 PM</div>
+          </div>
+          <div class="event yellow" style="top:38px; left:0; right:0; height:36px;" data-title="Diana, Luis Fernando, Emily, Silvia" data-time="8:00 – 9:00 PM">
+            <div class="title">DIANA, LUIS FERNANDO, EMILY, SILVIA</div><div class="time" style="display:inline; margin-left:6px;">8:00 – 9:00 PM</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="time-row"><div class="time-label">9 PM</div><div class="time-content"></div></div>
+      <div class="time-row"><div class="time-label">10 PM</div><div class="time-content"></div></div>
+
+      <div class="fab" id="fab">
+        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== MAP PAGE ===================== -->
+  <div class="page" id="page-map">
+    <div class="map-page">
+      <div class="map-canvas"></div>
+      <div class="map-pin p1" style="top:35%; left:30%;" data-title="Karina, Refugio" data-time="6:00 PM">
+        <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1112 6a2.5 2.5 0 010 5.5z"/></svg>
+        <div class="pin-label">Karina, Refugio</div>
+      </div>
+      <div class="map-pin p2" style="top:55%; left:60%;" data-title="Carlos" data-time="7:30 PM">
+        <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1112 6a2.5 2.5 0 010 5.5z"/></svg>
+        <div class="pin-label">Carlos</div>
+      </div>
+      <div class="map-pin p3" style="top:25%; left:70%;" data-title="David" data-time="4:00 PM">
+        <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1112 6a2.5 2.5 0 010 5.5z"/></svg>
+        <div class="pin-label">David</div>
+      </div>
+
+      <div class="map-controls">
+        <div class="map-btn" id="mapZoomIn"><svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg></div>
+        <div class="map-btn" id="mapZoomOut"><svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg></div>
+        <div class="map-btn" id="mapLocate"><svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 100 8 4 4 0 000-8zm8.94 3A8.994 8.994 0 0013 3.06V1h-2v2.06A8.994 8.994 0 003.06 11H1v2h2.06A8.994 8.994 0 0011 20.94V23h2v-2.06A8.994 8.994 0 0020.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SYNC PAGE ===================== -->
+  <div class="page" id="page-sync">
+    <div class="sync-page">
+      <div class="sync-status">
+        <div class="sync-circle" id="syncCircle">
+          <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08a5.99 5.99 0 01-5.65 4c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L14 11h7V4l-3.35 2.35z"/></svg>
+        </div>
+        <div class="label" id="syncLabel">Up to date</div>
+        <div class="sub" id="syncSub">Last synced 2 minutes ago</div>
+      </div>
+      <button class="sync-btn" id="syncBtn">Sync now</button>
+
+      <div class="home-section-title">Accounts</div>
+      <div class="sync-list-item"><div class="name">Google Calendar</div><div class="ok">● Connected</div></div>
+      <div class="sync-list-item"><div class="name">Contacts</div><div class="ok">● Connected</div></div>
+      <div class="sync-list-item"><div class="name">Local backup</div><div class="time">Yesterday, 9:12 PM</div></div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <!-- Bottom nav -->
+  <div class="bottom-nav">
+    <div class="nav-item" data-target="page-home">
+      <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+      Home
+    </div>
+    <div class="nav-item active" data-target="page-calendar">
+      <svg viewBox="0 0 24 24"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20a2 2 0 002 2h14a2 2 0 002-2V6a2 2 0 00-2-2zm0 16H5V9h14v11z"/></svg>
+      Calendar
+    </div>
+    <div class="nav-item" data-target="page-map">
+      <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1112 6a2.5 2.5 0 010 5.5z"/></svg>
+      Map
+    </div>
+    <div class="nav-item" data-target="page-sync">
+      <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08a5.99 5.99 0 01-5.65 4c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L14 11h7V4l-3.35 2.35z"/></svg>
+      Sync
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ---------- Theme toggle ----------
+  const body = document.body;
+  const themeToggle = document.getElementById('themeToggle');
+  function setTheme(mode){
+    body.classList.remove('dark','light');
+    body.classList.add(mode);
+    themeToggle.querySelector('.knob').textContent = mode === 'dark' ? '☀' : '🌙';
+    localStorage.setItem('calendar-theme', mode);
+  }
+  themeToggle.addEventListener('click', ()=>{
+    setTheme(body.classList.contains('dark') ? 'light' : 'dark');
+  });
+  setTheme(localStorage.getItem('calendar-theme') || 'dark');
+
+  // ---------- Page navigation ----------
+  const navItems = document.querySelectorAll('.nav-item');
+  const pages = document.querySelectorAll('.page');
+  function showPage(id){
+    pages.forEach(p => p.classList.toggle('visible', p.id === id));
+    navItems.forEach(n => n.classList.toggle('active', n.dataset.target === id));
+  }
+  navItems.forEach(item=>{
+    item.addEventListener('click', ()=> showPage(item.dataset.target));
+  });
+  // home page quick links also navigate
+  document.querySelectorAll('[data-target]').forEach(el=>{
+    if(el.classList.contains('nav-item')) return;
+    el.addEventListener('click', ()=> showPage(el.dataset.target));
+  });
+
+  // ---------- Toast helper ----------
+  const toast = document.getElementById('toast');
+  let toastTimer;
+  function showToast(msg){
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(()=> toast.classList.remove('show'), 1800);
+  }
+
+  // ---------- Calendar interactions ----------
+  document.querySelectorAll('.day-col').forEach(col=>{
+    col.addEventListener('click', ()=>{
+      document.querySelectorAll('.day-col').forEach(c=>c.classList.remove('active'));
+      col.classList.add('active');
+      showToast(col.querySelector('.dow').textContent + ' ' + col.querySelector('.dom').textContent + ' selected');
+    });
+  });
+
+  document.querySelectorAll('.event').forEach(ev=>{
+    ev.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      showToast(ev.dataset.title + ' · ' + ev.dataset.time);
+    });
+  });
+
+  document.getElementById('fab').addEventListener('click', ()=>{
+    showToast('New event ＋');
+  });
+
+  document.getElementById('dateSelect').addEventListener('click', ()=>{
+    showToast('Open date picker');
+  });
+  document.getElementById('searchIcon').addEventListener('click', ()=>{
+    showToast('Search events');
+  });
+
+  // ---------- Map interactions ----------
+  document.querySelectorAll('.map-pin').forEach(pin=>{
+    pin.addEventListener('click', ()=> showToast(pin.dataset.title + ' · ' + pin.dataset.time));
+  });
+  let mapScale = 1;
+  const mapCanvas = document.querySelector('.map-canvas');
+  document.getElementById('mapZoomIn').addEventListener('click', ()=>{
+    mapScale = Math.min(2, mapScale + 0.2);
+    mapCanvas.style.transform = `scale(${mapScale})`;
+  });
+  document.getElementById('mapZoomOut').addEventListener('click', ()=>{
+    mapScale = Math.max(0.6, mapScale - 0.2);
+    mapCanvas.style.transform = `scale(${mapScale})`;
+  });
+  document.getElementById('mapLocate').addEventListener('click', ()=> showToast('Centered on your location'));
+
+  // ---------- Sync interactions ----------
+  const syncBtn = document.getElementById('syncBtn');
+  const syncCircle = document.getElementById('syncCircle');
+  const syncLabel = document.getElementById('syncLabel');
+  const syncSub = document.getElementById('syncSub');
+  syncBtn.addEventListener('click', ()=>{
+    syncCircle.classList.add('spinning');
+    syncLabel.textContent = 'Syncing…';
+    syncBtn.disabled = true;
+    setTimeout(()=>{
+      syncCircle.classList.remove('spinning');
+      syncLabel.textContent = 'Up to date';
+      syncSub.textContent = 'Last synced just now';
+      syncBtn.disabled = false;
+      showToast('Sync complete ✓');
+    }, 1600);
+  });
+
+  // ---------- Live clock ----------
+  function updateClock(){
+    const now = new Date();
+    let h = now.getHours();
+    const m = now.getMinutes().toString().padStart(2,'0');
+    document.getElementById('clock').textContent = `${h}:${m}`;
+  }
+  updateClock();
+  setInterval(updateClock, 30000);
+</script>
+
+</body>
+</html>
