@@ -46,9 +46,18 @@ export default function Calendar() {
   const snap = settings.snapMinutes || SNAP_MINUTES
 
   useLayoutEffect(() => {
-    const row = gridRef.current?.querySelector('.time-row')
-    if (row) setRowH(row.getBoundingClientRect().height)
-  }, [])
+    if (calendarView !== 'day') return
+    const measure = () => {
+      const row = gridRef.current?.querySelector('.time-row')
+      if (row) {
+        const h = row.getBoundingClientRect().height
+        if (h > 0) setRowH(h)
+      }
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [calendarView])
 
   useEffect(() => {
     if (moveId || resizeId) {
@@ -77,13 +86,20 @@ export default function Calendar() {
   const minutesToTop = (minutes) => ((minutes - GRID_START_HOUR * 60) / 60) * rowH
   const minutesToHeight = (start, end) => Math.max(((end - start) / 60) * rowH, 22)
 
-  const shiftEvent = (origStart, origEnd, deltaY) => {
+  const yToMinutesRaw = (clientY) => {
+    if (!layerRef.current || rowH <= 0) return GRID_START_HOUR * 60
+    const rect = layerRef.current.getBoundingClientRect()
+    const offsetY = clientY - rect.top
+    const raw = GRID_START_HOUR * 60 + (offsetY / rowH) * 60
+    return clampMinutes(raw)
+  }
+
+  const placeEvent = (origStart, origEnd, clientY, grabOffset) => {
     const duration = origEnd - origStart
-    const deltaMin = snapMinutes((deltaY / rowH) * 60, snap)
     const minStart = GRID_START_HOUR * 60
     const maxEnd = GRID_END_HOUR * 60
 
-    let start = origStart + deltaMin
+    let start = snapMinutes(yToMinutesRaw(clientY) - grabOffset, snap)
     let end = start + duration
     if (start < minStart) {
       start = minStart
@@ -148,11 +164,14 @@ export default function Calendar() {
 
     const el = e.currentTarget
 
+    const grabOffset = yToMinutesRaw(e.clientY) - ev.start
+
     const session = {
       ev,
       el,
       pointerId: e.pointerId,
       startY: e.clientY,
+      grabOffset,
       origStart: ev.start,
       origEnd: ev.end,
       longPressed: false,
@@ -187,7 +206,7 @@ export default function Calendar() {
 
       me.preventDefault()
       session.moved = true
-      const next = shiftEvent(session.origStart, session.origEnd, me.clientY - session.startY)
+      const next = placeEvent(session.origStart, session.origEnd, me.clientY, session.grabOffset)
       setDraft({ id: ev.id, ...next })
     }
 
@@ -204,7 +223,7 @@ export default function Calendar() {
       }
 
       if (session.moved) {
-        const next = shiftEvent(session.origStart, session.origEnd, me.clientY - session.startY)
+        const next = placeEvent(session.origStart, session.origEnd, me.clientY, session.grabOffset)
         updateEvent({ ...ev, ...next })
         setDraft(null)
         setMoveId(null)
@@ -301,7 +320,7 @@ export default function Calendar() {
           onEventClick={openDetail}
         />
       ) : (
-      <div className="grid-wrap" ref={gridRef}>
+      <div className={`grid-wrap${moveId || resizeId ? ' calendar-dragging' : ''}`} ref={gridRef}>
         {hours.map((h) => (
           <div className="time-row" key={h}>
             <div className="time-label">{minutesToLabel(h * 60).replace(':00', '')}</div>

@@ -43,8 +43,6 @@ body{
 body.calendar-dragging{
   user-select:none;
   -webkit-user-select:none;
-  touch-action:none;
-  overflow:hidden;
 }
 
 .app-shell{
@@ -299,6 +297,11 @@ body.light .theme-toggle .knob{ left:19px; }
   color:#fff;
 }
 .date-picker-day:hover:not(.selected){ background:var(--line); }
+
+.grid-wrap.calendar-dragging{
+  touch-action:none;
+  overscroll-behavior:contain;
+}
 
 /* Pages */
 .page{ flex:1; min-height:0; display:flex; flex-direction:column; }
