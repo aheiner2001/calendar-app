@@ -23,8 +23,8 @@ import {
 } from '../lib/time.js'
 
 const MIN_DURATION = 15
-const LONG_PRESS_MS = 320
-const MOVE_CANCEL_PX = 8
+const LONG_PRESS_MS = 380
+const LONG_PRESS_TOUCH_MS = 480
 
 export default function Calendar() {
   const { events, selectedDate, setSelectedDate, settings, updateEvent, showToast, calendarView, setCalendarView } = useApp()
@@ -157,70 +157,77 @@ export default function Calendar() {
     openNew(yToHourSlot(e.clientY))
   }
 
-  // Short tap -> detail view. Hold without moving -> resize handles on release.
-  // Hold and drag (finger still down) -> move the whole block.
+  // Short tap -> detail. Hold -> drag or resize handles on release.
   const onEventPointerDown = (e, ev) => {
-    if (resizeId === ev.id) return
+    if (resizeId === ev.id || e.button !== 0) return
 
     const el = e.currentTarget
-
+    const gridEl = gridRef.current
     const grabOffset = yToMinutesRaw(e.clientY) - ev.start
+    const pressMs = e.pointerType === 'touch' ? LONG_PRESS_TOUCH_MS : LONG_PRESS_MS
 
     const session = {
       ev,
       el,
       pointerId: e.pointerId,
-      startY: e.clientY,
       grabOffset,
       origStart: ev.start,
       origEnd: ev.end,
       longPressed: false,
       moved: false,
       cancelled: false,
+      dragActive: false,
     }
 
-    const cleanup = () => {
-      clearTimeout(session.timer)
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', onUp)
-      if (session.longPressed) {
+    const clearDragVisuals = () => {
+      el.classList.remove('hold-active')
+      gridEl?.classList.remove('calendar-dragging')
+    }
+
+    const cleanupDragListeners = () => {
+      window.removeEventListener('pointermove', onDragMove)
+      window.removeEventListener('pointerup', onDragUp)
+      window.removeEventListener('pointercancel', onDragCancel)
+      if (session.dragActive) {
         try {
           el.releasePointerCapture(session.pointerId)
         } catch {
           /* already released */
         }
+        session.dragActive = false
+      }
+      clearDragVisuals()
+    }
+
+    const cleanupWaitListeners = () => {
+      clearTimeout(session.timer)
+      window.removeEventListener('pointermove', onWaitMove)
+      window.removeEventListener('pointerup', onWaitUp)
+      window.removeEventListener('pointercancel', onWaitCancel)
+    }
+
+    const onWaitMove = (me) => {
+      if (me.pointerId !== session.pointerId) return
+      const dy = Math.abs(me.clientY - e.clientY)
+      const dx = Math.abs(me.clientX - e.clientX)
+      // Finger moved enough to count as scrolling — don't tap or drag.
+      if (dy > 18 && dy > dx) {
+        session.cancelled = true
+        cleanupWaitListeners()
       }
     }
 
-    const onMove = (me) => {
+    const onDragMove = (me) => {
       if (me.pointerId !== session.pointerId) return
-
-      if (!session.longPressed) {
-        if (Math.abs(me.clientY - session.startY) > MOVE_CANCEL_PX) {
-          session.cancelled = true
-          cleanup()
-        }
-        return
-      }
-
       me.preventDefault()
       session.moved = true
       const next = placeEvent(session.origStart, session.origEnd, me.clientY, session.grabOffset)
       setDraft({ id: ev.id, ...next })
     }
 
-    const onUp = (me) => {
+    const onDragUp = (me) => {
       if (me.pointerId !== session.pointerId) return
-      cleanup()
-
-      if (!session.longPressed) {
-        if (!session.cancelled) {
-          me.stopPropagation()
-          openDetail(ev)
-        }
-        return
-      }
+      cleanupDragListeners()
 
       if (session.moved) {
         const next = placeEvent(session.origStart, session.origEnd, me.clientY, session.grabOffset)
@@ -237,8 +244,31 @@ export default function Calendar() {
       showToast('Drag the handles to resize')
     }
 
-    session.timer = setTimeout(() => {
+    const onDragCancel = (me) => {
+      if (me.pointerId !== session.pointerId) return
+      cleanupDragListeners()
+      setDraft(null)
+      setMoveId(null)
+    }
+
+    const onWaitUp = (me) => {
+      if (me.pointerId !== session.pointerId) return
+      cleanupWaitListeners()
+      if (!session.longPressed && !session.cancelled) openDetail(ev)
+    }
+
+    const onWaitCancel = (me) => {
+      if (me.pointerId !== session.pointerId) return
+      session.cancelled = true
+      cleanupWaitListeners()
+    }
+
+    const activateDrag = () => {
+      cleanupWaitListeners()
       session.longPressed = true
+      session.dragActive = true
+      el.classList.add('hold-active')
+      gridEl?.classList.add('calendar-dragging')
       try {
         el.setPointerCapture(session.pointerId)
       } catch {
@@ -246,22 +276,37 @@ export default function Calendar() {
       }
       setMoveId(ev.id)
       setDraft({ id: ev.id, start: ev.start, end: ev.end })
+      if (navigator.vibrate) navigator.vibrate(12)
       showToast('Drag to move')
-    }, LONG_PRESS_MS)
 
-    window.addEventListener('pointermove', onMove, { passive: false })
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', onUp)
+      window.addEventListener('pointermove', onDragMove, { passive: false })
+      window.addEventListener('pointerup', onDragUp)
+      window.addEventListener('pointercancel', onDragCancel)
+    }
+
+    session.timer = setTimeout(activateDrag, pressMs)
+    window.addEventListener('pointermove', onWaitMove, { passive: true })
+    window.addEventListener('pointerup', onWaitUp)
+    window.addEventListener('pointercancel', onWaitCancel)
   }
 
   const startHandleDrag = (e, ev, which) => {
     e.stopPropagation()
     e.preventDefault()
+    const handle = e.currentTarget
+    const gridEl = gridRef.current
     let cur = { start: ev.start, end: ev.end }
     setDraft({ id: ev.id, ...cur })
+    gridEl?.classList.add('calendar-dragging')
     document.body.classList.add('calendar-dragging')
+    try {
+      handle.setPointerCapture(e.pointerId)
+    } catch {
+      /* ignore */
+    }
 
     const move = (me) => {
+      if (me.pointerId !== e.pointerId) return
       me.preventDefault()
       const m = yToMinutes(me.clientY, snap)
       if (which === 'top') {
@@ -271,10 +316,18 @@ export default function Calendar() {
       }
       setDraft({ id: ev.id, ...cur })
     }
-    const up = () => {
+    const endDrag = (me) => {
+      if (me.pointerId !== e.pointerId) return
+      gridEl?.classList.remove('calendar-dragging')
       document.body.classList.remove('calendar-dragging')
       window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointerup', endDrag)
+      window.removeEventListener('pointercancel', endDrag)
+      try {
+        handle.releasePointerCapture(e.pointerId)
+      } catch {
+        /* ignore */
+      }
       const snapped = {
         start: snapMinutes(cur.start, snap),
         end: snapMinutes(cur.end, snap),
@@ -285,7 +338,8 @@ export default function Calendar() {
       showToast(formatRange(snapped.start, snapped.end))
     }
     window.addEventListener('pointermove', move, { passive: false })
-    window.addEventListener('pointerup', up)
+    window.addEventListener('pointerup', endDrag)
+    window.addEventListener('pointercancel', endDrag)
   }
 
   return (

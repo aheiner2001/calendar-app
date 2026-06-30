@@ -374,17 +374,19 @@ body.light .theme-toggle .knob{ left:19px; }
   user-select:none;
   -webkit-user-select:none;
 }
+.event.hold-active,
 .event.dragging,
 .event.resizing{
   touch-action:none;
 }
-.event:hover{ filter:brightness(1.12); }
+.event.hold-active,
 .event.resizing,
 .event.dragging{
   box-shadow:inset 0 0 0 2px var(--accent);
   z-index:10;
   filter:brightness(1.08);
 }
+.event:hover{ filter:brightness(1.12); }
 .event.dragging{ cursor:grabbing; }
 .event .title{
   font-weight:600;
