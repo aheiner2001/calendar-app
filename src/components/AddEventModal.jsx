@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
+import { calendarLabel } from '../lib/storage.js'
 import { REPEAT_OPTIONS, normalizeRepeat } from '../lib/repeat.js'
 import { minutesToTimeString, snapMinutes, timeStringToMinutes } from '../lib/time.js'
 
 export default function AddEventModal({ dayKey, editing, initialStart, initialEnd, onClose, onSaved }) {
-  const { settings, addEvent, updateEvent, deleteEvent } = useApp()
+  const { settings, addEvent, updateEvent, deleteEvent, writeCalendarId, calendars } = useApp()
+  const targetCalendarId = writeCalendarId()
+  const targetCalendarName = calendarLabel(calendars, targetCalendarId)
   const isEdit = Boolean(editing)
   const colors = settings.savedColors
   const fallbackColor = colors[0]?.color ?? '#2ec4b6'
@@ -41,6 +44,7 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
       color,
       repeat: repeat || null,
       notes: notes.trim(),
+      calendarId: editing?.calendarId || targetCalendarId,
     }
     try {
       if (isEdit) {
@@ -66,6 +70,7 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>{isEdit ? 'Edit event' : 'New event'}</h3>
+        <p className="settings-hint">Saving to {targetCalendarName}</p>
 
         {!isEdit && colors.length > 0 && (
           <>

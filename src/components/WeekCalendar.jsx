@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { layoutEvents } from '../lib/layout.js'
 import { eventsForDay } from '../lib/repeat.js'
+import { ALL_CALENDARS_ID, calendarLabel } from '../lib/calendars.js'
 import { colorFill } from '../lib/settings.js'
 import {
   GRID_START_HOUR,
@@ -11,7 +12,17 @@ import {
   minutesToLabel,
 } from '../lib/time.js'
 
-export default function WeekCalendar({ events, week, selectedDate, onSelectDay, onEventClick }) {
+export default function WeekCalendar({
+  events,
+  week,
+  selectedDate,
+  calendars,
+  activeCalendarId,
+  personalCalendarId,
+  onSelectDay,
+  onEventClick,
+}) {
+  const showCalendarNames = activeCalendarId === ALL_CALENDARS_ID
   const hours = gridHours()
   const gridHeight = hours.length * WEEK_ROW_H
   const selectedKey = dateKey(selectedDate)
@@ -61,6 +72,8 @@ export default function WeekCalendar({ events, week, selectedDate, onSelectDay, 
                   const top = minutesToTop(ev.start)
                   const height = minutesToHeight(ev.start, ev.end)
                   const width = 100 / ev.cols
+                  const calName = calendarLabel(calendars, ev.calendarId || personalCalendarId)
+                  const tooltip = showCalendarNames ? `${ev.title} · ${calName}` : ev.title
                   return (
                     <button
                       key={ev.id}
@@ -74,9 +87,13 @@ export default function WeekCalendar({ events, week, selectedDate, onSelectDay, 
                         background: colorFill(ev.color),
                         borderColor: ev.color,
                       }}
-                      title={ev.title}
+                      title={tooltip}
                       onClick={() => onEventClick(ev)}
-                    />
+                    >
+                      {showCalendarNames && height >= 28 && (
+                        <span className="week-event-cal">{calName}</span>
+                      )}
+                    </button>
                   )
                 })}
               </div>

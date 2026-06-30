@@ -2,6 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import AddEventModal from '../components/AddEventModal.jsx'
 import EventDetailModal from '../components/EventDetailModal.jsx'
+import EventCalendarTag from '../components/EventCalendarTag.jsx'
 import WeekCalendar from '../components/WeekCalendar.jsx'
 import { PlusIcon, RepeatIcon } from '../components/icons.jsx'
 import { layoutEvents } from '../lib/layout.js'
@@ -28,7 +29,7 @@ const LONG_PRESS_MS = 380
 const LONG_PRESS_TOUCH_MS = 480
 
 export default function Calendar() {
-  const { events, selectedDate, setSelectedDate, settings, updateEvent, deleteEvent, clearDay, showToast, calendarView, setCalendarView } = useApp()
+  const { events, selectedDate, setSelectedDate, settings, updateEvent, deleteEvent, clearDay, showToast, calendarView, setCalendarView, calendars, activeCalendarId, personalCalendarId } = useApp()
   const [modalOpen, setModalOpen] = useState(false)
   const [viewing, setViewing] = useState(null)
   const [editing, setEditing] = useState(null)
@@ -406,6 +407,9 @@ export default function Calendar() {
           events={events}
           week={week}
           selectedDate={selectedDate}
+          calendars={calendars}
+          activeCalendarId={activeCalendarId}
+          personalCalendarId={personalCalendarId}
           onSelectDay={(day) => {
             setSelectedDate(new Date(day))
             setCalendarView('day')
@@ -459,6 +463,12 @@ export default function Calendar() {
                 {(height > 30 || isResizing || isMoving) && (
                   <div className="time">{formatRange(live.start, live.end)}</div>
                 )}
+                <EventCalendarTag
+                  event={ev}
+                  calendars={calendars}
+                  activeCalendarId={activeCalendarId}
+                  personalCalendarId={personalCalendarId}
+                />
                 {isResizing && (
                   <div
                     className="resize-handle bottom"
@@ -480,6 +490,9 @@ export default function Calendar() {
       {viewing && (
         <EventDetailModal
           event={viewing}
+          calendars={calendars}
+          activeCalendarId={activeCalendarId}
+          personalCalendarId={personalCalendarId}
           onClose={() => setViewing(null)}
           onEdit={() => openEdit(viewing)}
         />

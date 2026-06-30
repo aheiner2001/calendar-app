@@ -24,8 +24,6 @@ import {
 } from 'firebase/firestore'
 import { auth, db, firebaseEnabled } from '../lib/firebase.js'
 import { DEFAULT_SETTINGS, normalizeSettings } from '../lib/settings.js'
-import { seedEvents } from '../lib/seed.js'
-import { dateKey } from '../lib/time.js'
 import {
   ALL_CALENDARS_ID,
   defaultPersonalCalendar,
@@ -58,12 +56,7 @@ function loadLocalEvents(uid) {
   } catch {
     /* ignore corrupt storage */
   }
-  const seeded = seedEvents(dateKey(new Date())).map((e) => ({
-    ...e,
-    calendarId: personalCalendarId(uid || 'local'),
-  }))
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded))
-  return seeded
+  return []
 }
 
 function loadSettings() {
@@ -233,17 +226,6 @@ export function AppProvider({ children }) {
     }
   }, [])
 
-  const ensureSampleEvents = useCallback(async (u) => {
-    const pid = personalCalendarId(u.uid)
-    const q = query(collection(db, 'events'), where('calendarId', '==', pid))
-    const snap = await getDocs(q)
-    if (!snap.empty) return
-
-    const day = dateKey(new Date())
-    const seeded = seedEvents(day).map((e) => toFirestoreEvent(e, e.id, pid, u.uid))
-    await Promise.all(seeded.map((record) => setDoc(doc(db, 'events', record.id), record)))
-  }, [])
-
   const syncFromCloud = useCallback(async () => {
     if (!firebaseEnabled || !user) {
       throw new Error('Sign in with Google to sync from the cloud')
@@ -258,12 +240,6 @@ export function AppProvider({ children }) {
       await ensurePersonalCalendar(user)
     } catch (err) {
       errors.push(`Personal: ${err.message || err.code}`)
-    }
-
-    try {
-      await ensureSampleEvents(user)
-    } catch (err) {
-      console.error('Sample events setup error:', err)
     }
 
     try {
@@ -305,7 +281,7 @@ export function AppProvider({ children }) {
           query(collection(db, 'events'), where('calendarId', '==', cal.id)),
         )
         snap.docs.forEach((d) => {
-          const e = migrate({ id: d.id, ...d.data(), userId: d.data().userId || user.uid }, user.uid)
+          const e = migrate({ id: d.id, ...d.data() }, user.uid)
           eventMap.set(e.id, e)
         })
       }
@@ -332,7 +308,7 @@ export function AppProvider({ children }) {
     setSyncError('')
     setLastSynced(new Date())
     return { importedCalendars, importedEvents }
-  }, [user, ensurePersonalCalendar, ensureSampleEvents, acceptEmailInvites])
+  }, [user, ensurePersonalCalendar, acceptEmailInvites])
 
   useEffect(() => {
     if (activeCalendarId === ALL_CALENDARS_ID) return
@@ -352,7 +328,6 @@ export function AppProvider({ children }) {
     let cancelled = false
     let unsubMember = () => {}
     let unsubOwner = () => {}
-    const unsubsCalendarEvents = []
 
     const memberQuery = query(
       collection(db, 'calendars'),
@@ -362,35 +337,11 @@ export function AppProvider({ children }) {
 
     let memberCals = []
     let ownerCals = []
-    const eventsByCalendar = new Map()
-    let calendarsFromServer = false
-    let eventsFromServer = false
 
     const docToCal = (d) => ({ id: d.id, ...d.data() })
-    const docToEvent = (d) =>
-      migrate({ id: d.id, ...d.data(), userId: d.data().userId || user.uid }, user.uid)
-
-    const tryReady = () => {
-      if (cancelled) return
-      if (calendarsFromServer && eventsFromServer) {
-        setSyncState('synced')
-        setSyncError('')
-        setLastSynced(new Date())
-      }
-    }
-
-    const allCalendars = () => {
-      const map = new Map()
-      pendingCalendarsRef.current.forEach((cal, id) => map.set(id, cal))
-      memberCals.forEach((cal) => map.set(cal.id, cal))
-      ownerCals.forEach((cal) => map.set(cal.id, cal))
-      const pid = personalCalendarId(user.uid)
-      if (!map.has(pid)) map.set(pid, defaultPersonalCalendar(user.uid))
-      return [...map.values()]
-    }
 
     const mergeCalendars = () => {
-      if (cancelled || !calendarsFromServer) return
+      if (cancelled) return
 
       memberCals.forEach((cal) => {
         if (pendingCalendarsRef.current.has(cal.id)) pendingCalendarsRef.current.delete(cal.id)
@@ -399,56 +350,17 @@ export function AppProvider({ children }) {
         if (pendingCalendarsRef.current.has(cal.id)) pendingCalendarsRef.current.delete(cal.id)
       })
 
-      const cals = allCalendars()
-      setCalendars(cals)
-      subscribeCalendarEvents(cals)
-      tryReady()
-    }
-
-    const mergeEvents = () => {
-      if (cancelled || !eventsFromServer) return
-
-      const serverIds = new Set()
-      eventsByCalendar.forEach((list) => list.forEach((e) => serverIds.add(e.id)))
-
-      for (const id of pendingDeletesRef.current) {
-        if (!serverIds.has(id)) pendingDeletesRef.current.delete(id)
-      }
-      for (const id of pendingAddsRef.current.keys()) {
-        if (serverIds.has(id)) pendingAddsRef.current.delete(id)
-      }
-
       const map = new Map()
-      eventsByCalendar.forEach((list) => {
-        list.forEach((e) => {
-          if (!pendingDeletesRef.current.has(e.id)) map.set(e.id, e)
-        })
-      })
-      pendingAddsRef.current.forEach((e, id) => {
-        if (!map.has(id)) map.set(id, e)
-      })
-      setAllEvents([...map.values()])
-      tryReady()
-    }
+      pendingCalendarsRef.current.forEach((cal, id) => map.set(id, cal))
+      memberCals.forEach((cal) => map.set(cal.id, cal))
+      ownerCals.forEach((cal) => map.set(cal.id, cal))
+      const pid = personalCalendarId(user.uid)
+      if (!map.has(pid)) map.set(pid, defaultPersonalCalendar(user.uid))
 
-    const subscribeCalendarEvents = (cals) => {
-      unsubsCalendarEvents.forEach((u) => u())
-      unsubsCalendarEvents.length = 0
-
-      for (const cal of cals) {
-        const eventsQuery = query(collection(db, 'events'), where('calendarId', '==', cal.id))
-        unsubsCalendarEvents.push(
-          onSnapshot(
-            eventsQuery,
-            (snapshot) => {
-              eventsByCalendar.set(cal.id, snapshot.docs.map(docToEvent))
-              eventsFromServer = true
-              mergeEvents()
-            },
-            (err) => console.error(`Events listener error (${cal.id}):`, err),
-          ),
-        )
-      }
+      setCalendars([...map.values()])
+      setSyncState('synced')
+      setSyncError('')
+      setLastSynced(new Date())
     }
 
     const boot = async () => {
@@ -463,25 +375,18 @@ export function AppProvider({ children }) {
           console.error('Personal calendar setup error:', err)
         }
         try {
-          await ensureSampleEvents(user)
-        } catch (err) {
-          console.error('Sample events setup error:', err)
-        }
-        try {
           await acceptEmailInvites(user)
         } catch (err) {
           console.error('Invite accept error:', err)
         }
         if (cancelled) return
 
-        calendarsFromServer = true
         mergeCalendars()
 
         unsubMember = onSnapshot(
           memberQuery,
           (snapshot) => {
             memberCals = snapshot.docs.map(docToCal)
-            calendarsFromServer = true
             mergeCalendars()
           },
           (err) => console.error('Calendars listener error (members):', err),
@@ -491,7 +396,6 @@ export function AppProvider({ children }) {
           ownerQuery,
           (snapshot) => {
             ownerCals = snapshot.docs.map(docToCal)
-            calendarsFromServer = true
             mergeCalendars()
           },
           (err) => console.error('Calendars listener error (owner):', err),
@@ -511,9 +415,61 @@ export function AppProvider({ children }) {
       cancelled = true
       unsubMember()
       unsubOwner()
-      unsubsCalendarEvents.forEach((u) => u())
     }
-  }, [user, ensurePersonalCalendar, ensureSampleEvents, acceptEmailInvites])
+  }, [user, ensurePersonalCalendar, acceptEmailInvites])
+
+  // Live event sync — one listener per calendar so shared events appear for all members.
+  useEffect(() => {
+    if (!firebaseEnabled || !user) return
+
+    const cals =
+      calendars.length > 0 ? calendars : [defaultPersonalCalendar(user.uid)]
+    let cancelled = false
+    const eventsByCalendar = new Map()
+
+    const docToEvent = (d) => migrate({ id: d.id, ...d.data() }, user.uid)
+
+    const mergeEvents = () => {
+      if (cancelled) return
+
+      const serverIds = new Set()
+      eventsByCalendar.forEach((list) => list.forEach((e) => serverIds.add(e.id)))
+      for (const id of pendingDeletesRef.current) {
+        if (!serverIds.has(id)) pendingDeletesRef.current.delete(id)
+      }
+      for (const id of pendingAddsRef.current.keys()) {
+        if (serverIds.has(id)) pendingAddsRef.current.delete(id)
+      }
+
+      const map = new Map()
+      eventsByCalendar.forEach((list) => {
+        list.forEach((e) => {
+          if (!pendingDeletesRef.current.has(e.id)) map.set(e.id, e)
+        })
+      })
+      pendingAddsRef.current.forEach((e, id) => {
+        if (!map.has(id)) map.set(id, e)
+      })
+      setAllEvents([...map.values()])
+    }
+
+    const unsubs = cals.map((cal) => {
+      const eventsQuery = query(collection(db, 'events'), where('calendarId', '==', cal.id))
+      return onSnapshot(
+        eventsQuery,
+        (snapshot) => {
+          eventsByCalendar.set(cal.id, snapshot.docs.map(docToEvent))
+          mergeEvents()
+        },
+        (err) => console.error(`Events listener error (${cal.id}):`, err),
+      )
+    })
+
+    return () => {
+      cancelled = true
+      unsubs.forEach((u) => u())
+    }
+  }, [firebaseEnabled, user, calendars])
 
   useEffect(() => {
     if (!firebaseEnabled) {
@@ -683,9 +639,10 @@ export function AppProvider({ children }) {
       const newCal = { id, ...cal }
       pendingCalendarsRef.current.set(id, newCal)
       setCalendars((prev) => (prev.some((c) => c.id === id) ? prev : [...prev, newCal]))
+      setActiveCalendarId(id)
       return newCal
     },
-    [user, uid],
+    [user, uid, setActiveCalendarId],
   )
 
   const ensureCalendarShareCode = useCallback(
@@ -836,6 +793,7 @@ export function AppProvider({ children }) {
         }
         return [...prev, joinedCal]
       })
+      setActiveCalendarId(joinedCal.id)
 
       if (invDocRef && !invMeta.email && !invMeta.permanent) {
         await deleteDoc(invDocRef)
@@ -843,7 +801,7 @@ export function AppProvider({ children }) {
 
       return joinedCal.name
     },
-    [user],
+    [user, setActiveCalendarId],
   )
 
   const deleteCalendar = useCallback(

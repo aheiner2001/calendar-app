@@ -1,7 +1,15 @@
 import { EditIcon, RepeatIcon } from './icons.jsx'
+import EventCalendarTag from './EventCalendarTag.jsx'
 import { repeatLabel } from '../lib/repeat.js'
 
-export default function EventDetailModal({ event, onClose, onEdit }) {
+export default function EventDetailModal({
+  event,
+  calendars,
+  activeCalendarId,
+  personalCalendarId,
+  onClose,
+  onEdit,
+}) {
   const notes = event.notes?.trim()
   const recurring = repeatLabel(event.repeat)
 
@@ -19,6 +27,13 @@ export default function EventDetailModal({ event, onClose, onEdit }) {
         </div>
 
         {recurring && <div className="event-detail-repeat">{recurring}</div>}
+
+        <EventCalendarTag
+          event={event}
+          calendars={calendars}
+          activeCalendarId={activeCalendarId}
+          personalCalendarId={personalCalendarId}
+        />
 
         {notes ? (
           <div className="event-detail-notes">{notes}</div>

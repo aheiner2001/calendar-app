@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import AddEventModal from '../components/AddEventModal.jsx'
+import EventCalendarTag from '../components/EventCalendarTag.jsx'
 import { eventsForDay } from '../lib/repeat.js'
 import { dateKey, formatRange } from '../lib/time.js'
 
@@ -14,7 +15,7 @@ function greeting(h) {
 }
 
 export default function Home() {
-  const { events, showToast } = useApp()
+  const { events, showToast, calendars, activeCalendarId, personalCalendarId } = useApp()
   const [addOpen, setAddOpen] = useState(false)
 
   const today = new Date()
@@ -46,6 +47,12 @@ export default function Home() {
               <div className="home-next-label">Next</div>
               <div className="etitle">{nextEvent.title}</div>
               <div className="etime">{formatRange(nextEvent.start, nextEvent.end)}</div>
+              <EventCalendarTag
+                event={nextEvent}
+                calendars={calendars}
+                activeCalendarId={activeCalendarId}
+                personalCalendarId={personalCalendarId}
+              />
             </div>
           </div>
         ) : (
@@ -60,6 +67,12 @@ export default function Home() {
                 <div className="etext">
                   <div className="etitle">{ev.title}</div>
                   <div className="etime">{formatRange(ev.start, ev.end)}</div>
+                  <EventCalendarTag
+                    event={ev}
+                    calendars={calendars}
+                    activeCalendarId={activeCalendarId}
+                    personalCalendarId={personalCalendarId}
+                  />
                 </div>
               </div>
             ))}
