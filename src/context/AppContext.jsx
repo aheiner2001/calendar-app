@@ -19,6 +19,7 @@ import {
   onSnapshot,
   query,
   setDoc,
+  updateDoc,
   where,
 } from 'firebase/firestore'
 import { auth, db, firebaseEnabled } from '../lib/firebase.js'
@@ -37,13 +38,11 @@ import { migrate, toFirestoreEvent } from '../lib/events.js'
 import { eventsForDay } from '../lib/repeat.js'
 import {
   ACTIVE_CALENDAR_KEY,
-  addKnownCalendarId,
+  clearCloudData,
   loadCloudCalendars,
   loadCloudEvents,
-  loadKnownCalendarIds,
   loadLocalCalendars,
   loadLocalInvites,
-  removeKnownCalendarId,
   saveCloudCalendars,
   saveCloudEvents,
   saveLocalCalendars,
@@ -183,6 +182,8 @@ export function AppProvider({ children }) {
   }, [])
 
   const signOut = useCallback(async () => {
+    const uid = auth.currentUser?.uid
+    if (uid) clearCloudData(uid)
     await firebaseSignOut(auth)
   }, [])
 
@@ -216,9 +217,11 @@ export function AppProvider({ children }) {
       const calRef = doc(db, 'calendars', inv.calendarId)
       const calSnap = await getDoc(calRef)
       if (!calSnap.exists()) continue
-      const members = calSnap.data().members || []
+      const calData = calSnap.data()
+      const members = Array.isArray(calData.members) ? [...calData.members] : []
       if (!members.includes(u.uid)) {
-        await setDoc(calRef, { members: arrayUnion(u.uid) }, { merge: true })
+        members.push(u.uid)
+        await updateDoc(calRef, { members })
       }
       await deleteDoc(d.ref)
     }
@@ -233,53 +236,32 @@ export function AppProvider({ children }) {
     if (!user) return
 
     let cancelled = false
-    let unsub = () => {}
+    let unsubMember = () => {}
+    let unsubOwner = () => {}
 
     const memberQuery = query(
       collection(db, 'calendars'),
       where('members', 'array-contains', user.uid),
     )
+    const ownerQuery = query(collection(db, 'calendars'), where('ownerId', '==', user.uid))
 
-    let queryCals = []
+    let memberCals = []
+    let ownerCals = []
+
     const docToCal = (d) => ({ id: d.id, ...d.data() })
 
-    const mergeCalendars = async () => {
+    const mergeCalendars = () => {
       if (cancelled) return
 
       const map = new Map()
       pendingCalendarsRef.current.forEach((cal, id) => map.set(id, cal))
-      queryCals.forEach((cal) => map.set(cal.id, cal))
+      memberCals.forEach((cal) => map.set(cal.id, cal))
+      ownerCals.forEach((cal) => map.set(cal.id, cal))
 
-      const cached = loadCloudCalendars(user.uid) || []
-      cached.forEach((cal) => {
-        if (!map.has(cal.id)) map.set(cal.id, cal)
+      memberCals.forEach((cal) => {
+        if (pendingCalendarsRef.current.has(cal.id)) pendingCalendarsRef.current.delete(cal.id)
       })
-
-      const knownIds = loadKnownCalendarIds(user.uid)
-      const missingIds = knownIds.filter((id) => !map.has(id))
-      if (missingIds.length) {
-        const fetched = await Promise.all(
-          missingIds.map(async (id) => {
-            try {
-              const snap = await getDocFromServer(doc(db, 'calendars', id))
-              if (!snap.exists()) {
-                removeKnownCalendarId(user.uid, id)
-                return null
-              }
-              return docToCal(snap)
-            } catch (err) {
-              console.error(`Calendar fetch error (${id}):`, err)
-              return cached.find((c) => c.id === id) || null
-            }
-          }),
-        )
-        fetched.filter(Boolean).forEach((cal) => {
-        map.set(cal.id, cal)
-        pendingCalendarsRef.current.delete(cal.id)
-      })
-      }
-
-      queryCals.forEach((cal) => {
+      ownerCals.forEach((cal) => {
         if (pendingCalendarsRef.current.has(cal.id)) pendingCalendarsRef.current.delete(cal.id)
       })
 
@@ -297,12 +279,7 @@ export function AppProvider({ children }) {
       setSyncState('syncing')
 
       const cached = loadCloudCalendars(user.uid)
-      if (cached?.length) {
-        setCalendars(cached)
-        cached
-          .filter((c) => c.type === 'shared')
-          .forEach((c) => addKnownCalendarId(user.uid, c.id))
-      }
+      if (cached?.length) setCalendars(cached)
 
       try {
         await user.getIdToken()
@@ -318,26 +295,43 @@ export function AppProvider({ children }) {
         }
         if (cancelled) return
 
-        const memberSnap = await getDocsFromServer(memberQuery)
-        queryCals = memberSnap.docs.map(docToCal)
-        await mergeCalendars()
+        const [memberSnap, ownerSnap] = await Promise.all([
+          getDocsFromServer(memberQuery),
+          getDocsFromServer(ownerQuery),
+        ])
+        memberCals = memberSnap.docs.map(docToCal)
+        ownerCals = ownerSnap.docs.map(docToCal)
+        mergeCalendars()
 
-        unsub = onSnapshot(
+        unsubMember = onSnapshot(
           memberQuery,
           (snapshot) => {
             if (snapshot.metadata.fromCache && snapshot.empty) return
-            queryCals = snapshot.docs.map(docToCal)
+            memberCals = snapshot.docs.map(docToCal)
             mergeCalendars()
           },
           (err) => {
-            console.error('Calendars listener error:', err)
+            console.error('Calendars listener error (members):', err)
+            if (!cancelled) setSyncState('error')
+          },
+        )
+
+        unsubOwner = onSnapshot(
+          ownerQuery,
+          (snapshot) => {
+            if (snapshot.metadata.fromCache && snapshot.empty) return
+            ownerCals = snapshot.docs.map(docToCal)
+            mergeCalendars()
+          },
+          (err) => {
+            console.error('Calendars listener error (owner):', err)
             if (!cancelled) setSyncState('error')
           },
         )
       } catch (err) {
         console.error('Calendar boot error:', err)
         if (!cancelled) {
-          await mergeCalendars()
+          mergeCalendars()
           setSyncState('error')
         }
       }
@@ -347,7 +341,8 @@ export function AppProvider({ children }) {
 
     return () => {
       cancelled = true
-      unsub()
+      unsubMember()
+      unsubOwner()
     }
   }, [user, ensurePersonalCalendar, acceptEmailInvites])
 
@@ -638,10 +633,8 @@ export function AppProvider({ children }) {
         expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
       })
       const newCal = { id, ...cal }
-      addKnownCalendarId(user.uid, id)
       pendingCalendarsRef.current.set(id, newCal)
       setCalendars((prev) => (prev.some((c) => c.id === id) ? prev : [...prev, newCal]))
-      saveCloudCalendars(user.uid, [newCal])
       return newCal
     },
     [user, uid],
@@ -723,70 +716,66 @@ export function AppProvider({ children }) {
       if (!code) throw new Error('Enter an invite code')
 
       if (!firebaseEnabled || !user) {
-        const invites = loadLocalInvites()
-        const inv = invites.find((i) => i.code === code)
-        if (!inv) throw new Error('Invalid or expired invite')
+        throw new Error('Sign in with Google to join a shared calendar')
+      }
+
+      let calRef = null
+      let invDocRef = null
+      let invMeta = null
+
+      const calByCode = await getDocs(
+        query(collection(db, 'calendars'), where('shareCode', '==', code)),
+      )
+      if (!calByCode.empty) {
+        const calDoc = calByCode.docs[0]
+        calRef = calDoc.ref
+        invMeta = {
+          calendarName: calDoc.data().name,
+          createdBy: calDoc.data().ownerId,
+        }
+      } else {
+        const inviteSnap = await getDocs(query(collection(db, 'invites'), where('code', '==', code)))
+        if (inviteSnap.empty) throw new Error('Invalid invite code')
+        invDocRef = inviteSnap.docs[0].ref
+        const inv = inviteSnap.docs[0].data()
         if (inv.expiresAt < Date.now()) throw new Error('Invite expired')
-        setCalendars((prev) => {
-          if (prev.some((c) => c.id === inv.calendarId)) return prev
-          const existing = loadLocalCalendars(uid).find((c) => c.id === inv.calendarId)
-          const cal = existing || {
-            id: inv.calendarId,
-            name: inv.calendarName,
-            ownerId: inv.createdBy,
-            members: [inv.createdBy, uid],
-            type: 'shared',
-            createdAt: Date.now(),
+        if (inv.email && user.email?.toLowerCase() !== inv.email) {
+          throw new Error('This invite was sent to a different email')
+        }
+        calRef = doc(db, 'calendars', inv.calendarId)
+        invMeta = { calendarName: inv.calendarName, createdBy: inv.createdBy, permanent: inv.permanent }
+      }
+
+      const calSnap = await getDoc(calRef)
+      if (!calSnap.exists()) throw new Error('Calendar no longer exists')
+
+      const calData = calSnap.data()
+      if (calData.type !== 'shared') throw new Error('Not a shared calendar')
+
+      const members = Array.isArray(calData.members) ? [...calData.members] : []
+      if (!members.includes(user.uid)) {
+        members.push(user.uid)
+        try {
+          await updateDoc(calRef, { members })
+        } catch (err) {
+          const msg = String(err?.message || err?.code || '')
+          if (msg.includes('permission') || err?.code === 'permission-denied') {
+            throw new Error(
+              'Permission denied joining calendar. Deploy the latest Firestore rules: firebase deploy --only firestore:rules',
+            )
           }
-          if (!cal.members.includes(uid)) cal.members.push(uid)
-          return [...prev.filter((c) => c.id !== cal.id), cal]
-        })
-        return inv.calendarName
-      }
-
-      const snap = await getDocs(query(collection(db, 'invites'), where('code', '==', code)))
-      if (snap.empty) throw new Error('Invalid or expired invite')
-      const invDoc = snap.docs[0]
-      const inv = invDoc.data()
-      if (inv.expiresAt < Date.now()) throw new Error('Invite expired')
-      if (inv.email && user.email?.toLowerCase() !== inv.email) {
-        throw new Error('This invite was sent to a different email')
-      }
-      const calRef = doc(db, 'calendars', inv.calendarId)
-
-      try {
-        await setDoc(calRef, { members: arrayUnion(user.uid) }, { merge: true })
-      } catch (err) {
-        const msg = String(err?.message || err?.code || '')
-        if (msg.includes('permission') || err?.code === 'permission-denied') {
-          throw new Error('Could not join calendar — permission denied. Ask the owner to redeploy the latest app rules.')
-        }
-        throw err
-      }
-
-      let calData
-      try {
-        const calSnap = await getDoc(calRef)
-        calData = calSnap.exists()
-          ? calSnap.data()
-          : { name: inv.calendarName, ownerId: inv.createdBy, type: 'shared', members: [user.uid] }
-      } catch {
-        calData = {
-          name: inv.calendarName,
-          ownerId: inv.createdBy,
-          type: 'shared',
-          members: [inv.createdBy, user.uid],
+          throw err
         }
       }
 
-      const members = Array.isArray(calData.members) ? calData.members : []
       const joinedCal = {
-        id: inv.calendarId,
+        id: calRef.id,
         ...calData,
-        name: calData.name || inv.calendarName,
-        type: calData.type || 'shared',
-        members: members.includes(user.uid) ? members : [...members, user.uid],
+        name: calData.name || invMeta.calendarName,
+        type: 'shared',
+        members,
       }
+
       pendingCalendarsRef.current.set(joinedCal.id, joinedCal)
       setCalendars((prev) => {
         if (prev.some((c) => c.id === joinedCal.id)) {
@@ -794,12 +783,14 @@ export function AppProvider({ children }) {
         }
         return [...prev, joinedCal]
       })
-      addKnownCalendarId(user.uid, joinedCal.id)
-      saveCloudCalendars(user.uid, [joinedCal])
-      if (!inv.email && !inv.permanent) await deleteDoc(invDoc.ref)
-      return inv.calendarName
+
+      if (invDocRef && !invMeta.email && !invMeta.permanent) {
+        await deleteDoc(invDocRef)
+      }
+
+      return joinedCal.name
     },
-    [user, uid],
+    [user],
   )
 
   const deleteCalendar = useCallback(
@@ -828,7 +819,6 @@ export function AppProvider({ children }) {
       if (!isOwner) {
         await setDoc(doc(db, 'calendars', calendarId), { members: arrayRemove(user.uid) }, { merge: true })
         pendingCalendarsRef.current.delete(calendarId)
-        removeKnownCalendarId(user.uid, calendarId)
         setCalendars((prev) => prev.filter((c) => c.id !== calendarId))
         clearActive()
         return
@@ -847,7 +837,6 @@ export function AppProvider({ children }) {
 
       setCalendars((prev) => prev.filter((c) => c.id !== calendarId))
       pendingCalendarsRef.current.delete(calendarId)
-      removeKnownCalendarId(user.uid, calendarId)
       setAllEvents((prev) => prev.filter((e) => e.calendarId !== calendarId))
       clearActive()
     },

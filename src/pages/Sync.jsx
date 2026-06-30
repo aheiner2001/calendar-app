@@ -160,6 +160,13 @@ export default function Sync() {
           </div>
         )}
 
+        {firebaseEnabled && user && (
+          <p className="settings-hint share-sync-hint">
+            Signed in as {user.email}. Calendars and events sync through your Google account — use the
+            same sign-in on every device.
+          </p>
+        )}
+
         {(firebaseEnabled && user) || !firebaseEnabled ? (
           <>
             <div className="home-section-title">My calendars</div>

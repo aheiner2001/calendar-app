@@ -54,11 +54,14 @@ function loadCloudCalendars(uid) {
 
 function saveCloudCalendars(uid, calendars) {
   if (!uid || uid === 'local') return
-  const existing = loadCloudCalendars(uid) || []
-  const map = new Map()
-  existing.forEach((c) => map.set(c.id, c))
-  calendars.forEach((c) => map.set(c.id, c))
-  localStorage.setItem(cloudCalendarsKey(uid), JSON.stringify([...map.values()]))
+  localStorage.setItem(cloudCalendarsKey(uid), JSON.stringify(calendars))
+}
+
+function clearCloudData(uid) {
+  if (!uid || uid === 'local') return
+  localStorage.removeItem(cloudCalendarsKey(uid))
+  localStorage.removeItem(cloudEventsKey(uid))
+  localStorage.removeItem(knownCalendarIdsKey(uid))
 }
 
 function knownCalendarIdsKey(uid) {
@@ -136,6 +139,7 @@ export {
   saveLocalCalendars,
   loadCloudCalendars,
   saveCloudCalendars,
+  clearCloudData,
   loadKnownCalendarIds,
   addKnownCalendarId,
   removeKnownCalendarId,

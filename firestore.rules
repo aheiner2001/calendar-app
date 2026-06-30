@@ -22,9 +22,9 @@ service cloud.firestore {
         );
     }
 
-    // Allow a signed-in user to add only themselves to members (invite join flow).
-    function isSelfJoin() {
+    function isSharedCalendarJoin() {
       return isSignedIn()
+        && resource.data.type == 'shared'
         && request.resource.data.members is list
         && request.resource.data.members.hasAny([request.auth.uid])
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
@@ -35,12 +35,14 @@ service cloud.firestore {
     }
 
     match /calendars/{calendarId} {
+      // Members/owners see their calendars; any signed-in user can read shared calendars (for join by code).
       allow read: if isSignedIn() && (
         resource.data.ownerId == request.auth.uid
         || (
           resource.data.members is list
           && resource.data.members.hasAny([request.auth.uid])
         )
+        || resource.data.type == 'shared'
       );
 
       allow create: if isSignedIn()
@@ -54,7 +56,7 @@ service cloud.firestore {
           resource.data.members is list
           && resource.data.members.hasAny([request.auth.uid])
         )
-        || isSelfJoin()
+        || isSharedCalendarJoin()
       );
 
       allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
