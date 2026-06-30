@@ -2,22 +2,19 @@ import { useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import { minutesToTimeString, snapMinutes, timeStringToMinutes } from '../lib/time.js'
 
-export default function AddEventModal({ dayKey, editing, initialStart, onClose, onSaved }) {
+export default function AddEventModal({ dayKey, editing, initialStart, initialEnd, onClose, onSaved }) {
   const { settings, addEvent, updateEvent, deleteEvent } = useApp()
   const isEdit = Boolean(editing)
   const colors = settings.savedColors
   const fallbackColor = colors[0]?.color ?? '#2ec4b6'
 
+  const defaultStart = editing?.start ?? initialStart ?? 9 * 60
+  const defaultEnd = editing?.end ?? initialEnd ?? defaultStart + settings.defaultDurationMinutes
+
   const [title, setTitle] = useState(editing?.title ?? '')
   const [color, setColor] = useState(editing?.color ?? fallbackColor)
-  const [start, setStart] = useState(
-    minutesToTimeString(snapMinutes(editing?.start ?? initialStart ?? 9 * 60)),
-  )
-  const [end, setEnd] = useState(
-    minutesToTimeString(
-      snapMinutes(editing?.end ?? (initialStart ?? 9 * 60) + settings.defaultDurationMinutes),
-    ),
-  )
+  const [start, setStart] = useState(minutesToTimeString(snapMinutes(defaultStart)))
+  const [end, setEnd] = useState(minutesToTimeString(snapMinutes(defaultEnd)))
   const [repeat, setRepeat] = useState(editing?.repeat ?? false)
 
   const applyPreset = (preset) => {

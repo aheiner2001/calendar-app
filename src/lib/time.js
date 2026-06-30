@@ -8,6 +8,14 @@ export function snapMinutes(minutes, step = SNAP_MINUTES) {
   return Math.round(minutes / step) * step
 }
 
+/** Snap to the hour row clicked (e.g. 9:45 → 9:00–10:00). */
+export function snapToHourSlot(minutes) {
+  const clamped = Math.max(GRID_START_HOUR * 60, Math.min(GRID_END_HOUR * 60 - 1, minutes))
+  const start = Math.floor(clamped / 60) * 60
+  const end = Math.min(start + 60, GRID_END_HOUR * 60)
+  return { start, end }
+}
+
 export function pad(n) {
   return n.toString().padStart(2, '0')
 }

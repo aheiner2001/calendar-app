@@ -11,6 +11,7 @@ import {
   SNAP_MINUTES,
   dateKey,
   snapMinutes,
+  snapToHourSlot,
   dowLabel,
   formatRange,
   gridHours,
@@ -26,7 +27,7 @@ export default function Calendar() {
   const { events, selectedDate, setSelectedDate, settings, updateEvent, showToast } = useApp()
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState(null)
-  const [newStart, setNewStart] = useState(null)
+  const [newSlot, setNewSlot] = useState(null) // { start, end } when adding from grid tap
   const [resizeId, setResizeId] = useState(null)
   const [moveId, setMoveId] = useState(null)
   const [draft, setDraft] = useState(null) // {id, start, end} live values while dragging
@@ -85,11 +86,18 @@ export default function Calendar() {
     return { start, end }
   }
 
-  const openNew = (startMinutes) => {
+  const yToHourSlot = (clientY) => {
+    const rect = layerRef.current.getBoundingClientRect()
+    const offsetY = clientY - rect.top
+    const raw = GRID_START_HOUR * 60 + (offsetY / rowH) * 60
+    return snapToHourSlot(raw)
+  }
+
+  const openNew = (slot) => {
     setResizeId(null)
     setMoveId(null)
     setEditing(null)
-    setNewStart(startMinutes ?? null)
+    setNewSlot(slot ?? null)
     setModalOpen(true)
   }
 
@@ -97,7 +105,7 @@ export default function Calendar() {
     setResizeId(null)
     setMoveId(null)
     setEditing(ev)
-    setNewStart(null)
+    setNewSlot(null)
     setModalOpen(true)
   }
 
@@ -106,7 +114,7 @@ export default function Calendar() {
       setResizeId(null)
       return
     }
-    openNew(yToMinutes(e.clientY))
+    openNew(yToHourSlot(e.clientY))
   }
 
   // Short tap -> edit. Hold without moving -> resize handles on release.
@@ -308,7 +316,8 @@ export default function Calendar() {
         <AddEventModal
           dayKey={selectedKey}
           editing={editing}
-          initialStart={newStart}
+          initialStart={newSlot?.start}
+          initialEnd={newSlot?.end}
           onClose={() => setModalOpen(false)}
           onSaved={(msg) => showToast(msg)}
         />
