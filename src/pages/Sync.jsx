@@ -2,46 +2,35 @@ import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useApp } from '../context/AppContext.jsx'
 import { useInviteQr, useQrScanner } from '../lib/qr.js'
-import { SyncIcon } from '../components/icons.jsx'
-
-function relativeTime(date) {
-  if (!date) return 'never'
-  const secs = Math.floor((Date.now() - date.getTime()) / 1000)
-  if (secs < 60) return 'just now'
-  const mins = Math.floor(secs / 60)
-  if (mins < 60) return `${mins} minute${mins > 1 ? 's' : ''} ago`
-  const hrs = Math.floor(mins / 60)
-  return `${hrs} hour${hrs > 1 ? 's' : ''} ago`
-}
+import { TrashIcon } from '../components/icons.jsx'
 
 export default function Sync() {
   const {
     firebaseEnabled,
-    syncState,
-    lastSynced,
-    allEvents,
     calendars,
+    activeCalendarId,
+    setActiveCalendarId,
     user,
     signOut,
     showToast,
     createSharedCalendar,
-    createInvite,
+    deleteCalendar,
     joinByInviteCode,
+    ensureCalendarShareCode,
     signInWithGoogle,
   } = useApp()
 
   const [searchParams, setSearchParams] = useSearchParams()
   const [sharedName, setSharedName] = useState('')
-  const [shareCalendarId, setShareCalendarId] = useState('')
-  const [inviteEmail, setInviteEmail] = useState('')
-  const [invite, setInvite] = useState(null)
   const [joinCode, setJoinCode] = useState(searchParams.get('join') || '')
   const [scanning, setScanning] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [share, setShare] = useState(null)
+  const [shareLoading, setShareLoading] = useState(false)
 
-  const sharedCalendars = calendars.filter((c) => c.type === 'shared')
-  const qrUrl = invite?.url ?? ''
-  const qrImage = useInviteQr(qrUrl)
+  const activeCal = calendars.find((c) => c.id === activeCalendarId)
+  const isSharedActive = activeCal?.type === 'shared'
+  const shareQrImage = useInviteQr(share?.url ?? '')
 
   const handleScannedCode = useCallback(
     async (code) => {
@@ -71,34 +60,33 @@ export default function Sync() {
   }, [searchParams, user]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!shareCalendarId && sharedCalendars[0]) {
-      setShareCalendarId(sharedCalendars[0].id)
+    if (!isSharedActive) {
+      setShare(null)
+      return
     }
-  }, [sharedCalendars, shareCalendarId])
+    let cancelled = false
+    setShareLoading(true)
+    ensureCalendarShareCode(activeCalendarId)
+      .then((info) => {
+        if (!cancelled) setShare(info)
+      })
+      .finally(() => {
+        if (!cancelled) setShareLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeCalendarId, isSharedActive, ensureCalendarShareCode])
 
   const handleCreateShared = async () => {
     setBusy(true)
     try {
       const cal = await createSharedCalendar(sharedName)
       setSharedName('')
-      setShareCalendarId(cal.id)
+      setActiveCalendarId(cal.id)
       showToast(`Created "${cal.name}"`)
     } catch {
       showToast('Could not create calendar')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleCreateInvite = async () => {
-    if (!shareCalendarId) return
-    setBusy(true)
-    try {
-      const inv = await createInvite(shareCalendarId, inviteEmail)
-      setInvite(inv)
-      showToast(inviteEmail ? 'Invite created for email' : 'Invite link ready')
-    } catch (err) {
-      showToast(err.message || 'Could not create invite')
     } finally {
       setBusy(false)
     }
@@ -118,30 +106,44 @@ export default function Sync() {
     }
   }
 
-  const label = firebaseEnabled
-    ? syncState === 'synced'
-      ? 'Up to date'
-      : syncState === 'error'
-        ? 'Connection error'
-        : syncState === 'offline'
-          ? 'Sign in required'
-          : 'Connecting…'
-    : 'Local only'
+  const handleRemoveCalendar = async (cal) => {
+    const isOwner = cal.ownerId === (user?.uid ?? 'local')
+    const action = isOwner ? 'delete' : 'leave'
+    const msg = isOwner
+      ? `Delete "${cal.name}"? All events on this calendar will be removed for everyone.`
+      : `Leave "${cal.name}"? You can rejoin with an invite code.`
+    if (!window.confirm(msg)) return
+
+    setBusy(true)
+    try {
+      await deleteCalendar(cal.id)
+      showToast(isOwner ? `Deleted "${cal.name}"` : `Left "${cal.name}"`)
+    } catch (err) {
+      showToast(err.message || `Could not ${action} calendar`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const initials = user?.email?.[0]?.toUpperCase() ?? '?'
 
   return (
     <div className="page">
-      <div className="sync-page">
-        <div className="sync-status">
-          <div className="sync-circle">
-            <SyncIcon />
+      <div className="share-page">
+        {firebaseEnabled && user && (
+          <div className="share-profile">
+            <div className="share-avatar" aria-hidden="true">
+              {initials}
+            </div>
+            <div className="share-profile-info">
+              <div className="share-profile-name">{user.displayName || 'Signed in'}</div>
+              <div className="share-profile-email">{user.email}</div>
+            </div>
+            <button type="button" className="btn btn-ghost share-signout" onClick={signOut}>
+              Sign out
+            </button>
           </div>
-          <div className="label">{label}</div>
-          <div className="sub">
-            {firebaseEnabled
-              ? `${allEvents.length} events · last synced ${relativeTime(lastSynced)}`
-              : 'Sign in to link calendars with others'}
-          </div>
-        </div>
+        )}
 
         {!firebaseEnabled && (
           <div className="sync-callout">
@@ -160,13 +162,65 @@ export default function Sync() {
 
         {(firebaseEnabled && user) || !firebaseEnabled ? (
           <>
-            <div className="home-section-title">Your calendars</div>
-            {calendars.map((c) => (
-              <div key={c.id} className="sync-list-item">
-                <div className="name">{c.name}</div>
-                <div className="time">{c.type === 'personal' ? 'Personal' : 'Shared'}</div>
-              </div>
-            ))}
+            <div className="home-section-title">My calendars</div>
+            {calendars.length === 0 ? (
+              <p className="share-empty">No calendars yet — create one below.</p>
+            ) : (
+              calendars.map((c) => {
+                const isOwner = c.ownerId === (user?.uid ?? 'local')
+                const canRemove = c.type !== 'personal'
+                return (
+                  <div
+                    key={c.id}
+                    className={`share-calendar-item${c.id === activeCalendarId ? ' active' : ''}`}
+                  >
+                    <button
+                      type="button"
+                      className="share-calendar-main"
+                      onClick={() => setActiveCalendarId(c.id)}
+                    >
+                      <div className="name">{c.name}</div>
+                      <div className="time">
+                        {c.type === 'personal' ? 'Personal' : isOwner ? 'Shared · yours' : 'Shared · joined'}
+                      </div>
+                    </button>
+                    {canRemove && (
+                      <button
+                        type="button"
+                        className="share-calendar-remove"
+                        onClick={() => handleRemoveCalendar(c)}
+                        disabled={busy}
+                        aria-label={isOwner ? `Delete ${c.name}` : `Leave ${c.name}`}
+                        title={isOwner ? 'Delete calendar' : 'Leave calendar'}
+                      >
+                        <TrashIcon />
+                      </button>
+                    )}
+                  </div>
+                )
+              })
+            )}
+
+            {isSharedActive && (
+              <>
+                <div className="home-section-title">Share {activeCal.name}</div>
+                {shareLoading && <p className="share-empty">Loading share code…</p>}
+                {!shareLoading && share && (
+                  <div className="sync-invite-card">
+                    <div className="sync-invite-code">{share.code}</div>
+                    <p className="settings-hint">Share this code or scan the QR for others to join.</p>
+                    {shareQrImage && <img src={shareQrImage} alt="Calendar invite QR" className="sync-qr" />}
+                    <input
+                      type="text"
+                      readOnly
+                      value={share.url}
+                      className="sync-copy-field"
+                      onFocus={(e) => e.target.select()}
+                    />
+                  </div>
+                )}
+              </>
+            )}
 
             <div className="home-section-title">Create shared calendar</div>
             <div className="sync-form-row">
@@ -180,39 +234,6 @@ export default function Sync() {
                 Create
               </button>
             </div>
-
-            {sharedCalendars.length > 0 && (
-              <>
-                <div className="home-section-title">Invite someone</div>
-                <label className="sync-field-label">Calendar</label>
-                <select value={shareCalendarId} onChange={(e) => setShareCalendarId(e.target.value)}>
-                  {sharedCalendars.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-                <label className="sync-field-label">Email (optional)</label>
-                <input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="friend@email.com — auto-joins when they sign in"
-                />
-                <button type="button" className="btn btn-primary sync-full-btn" onClick={handleCreateInvite} disabled={busy}>
-                  Generate invite link & QR
-                </button>
-
-                {invite && (
-                  <div className="sync-invite-card">
-                    <div className="sync-invite-code">{invite.code}</div>
-                    <p className="settings-hint">Share this code or scan the QR. Expires in 7 days.</p>
-                    {qrImage && <img src={qrImage} alt="Invite QR code" className="sync-qr" />}
-                    <input type="text" readOnly value={invite.url} className="sync-copy-field" onFocus={(e) => e.target.select()} />
-                  </div>
-                )}
-              </>
-            )}
 
             <div className="home-section-title">Join a calendar</div>
             <div className="sync-form-row">
@@ -238,16 +259,6 @@ export default function Sync() {
             )}
           </>
         ) : null}
-
-        <div className="home-section-title">Account</div>
-        {firebaseEnabled && user && (
-          <div className="sync-list-item">
-            <div className="name">{user.email}</div>
-            <button type="button" className="btn btn-ghost sync-signout" onClick={signOut}>
-              Sign out
-            </button>
-          </div>
-        )}
       </div>
     </div>
   )

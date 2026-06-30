@@ -1,8 +1,8 @@
-// Firebase is optional. When configured, the app requires Google or Apple sign-in
-// so Firestore rules can enforce per-user access.
 import { initializeApp } from 'firebase/app'
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { getAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
+import { getAI, getGenerativeModel, GoogleAIBackend } from 'firebase/ai'
 
 const config = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -15,13 +15,46 @@ const config = {
 
 export const firebaseEnabled = Boolean(config.apiKey && config.projectId)
 
+const geminiModelName = import.meta.env.VITE_GEMINI_MODEL || 'gemini-2.5-flash'
+const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY
+
+let app = null
 let db = null
 let auth = null
+let geminiModel = null
 
 if (firebaseEnabled) {
-  const app = initializeApp(config)
+  app = initializeApp(config)
+
+  if (import.meta.env.DEV && import.meta.env.VITE_APP_CHECK_DEBUG_TOKEN) {
+    self.FIREBASE_APPCHECK_DEBUG_TOKEN = import.meta.env.VITE_APP_CHECK_DEBUG_TOKEN
+  }
+
+  if (recaptchaSiteKey) {
+    initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider(recaptchaSiteKey),
+      isTokenAutoRefreshEnabled: true,
+    })
+  }
+
   db = getFirestore(app)
   auth = getAuth(app)
+
+  if (!recaptchaSiteKey && import.meta.env.DEV) {
+    console.info(
+      '[Area Book] No VITE_RECAPTCHA_SITE_KEY — if Firestore returns "missing permissions", ' +
+        'set App Check to Monitor (not Enforce) in Firebase Console → App Check.',
+    )
+  }
+
+  try {
+    const ai = getAI(app, { backend: new GoogleAIBackend() })
+    geminiModel = getGenerativeModel(ai, { model: geminiModelName })
+  } catch (err) {
+    console.warn('Firebase AI Logic is not available:', err)
+  }
 }
 
-export { db, auth }
+export const appCheckEnabled = Boolean(recaptchaSiteKey)
+export const aiEnabled = Boolean(geminiModel)
+export { db, auth, app, geminiModel }

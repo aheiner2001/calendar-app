@@ -18,6 +18,7 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
   const [end, setEnd] = useState(minutesToTimeString(snapMinutes(defaultEnd)))
   const [repeat, setRepeat] = useState(() => normalizeRepeat(editing?.repeat) || '')
   const [notes, setNotes] = useState(editing?.notes ?? '')
+  const [error, setError] = useState('')
 
   const snapTime = (value) => minutesToTimeString(snapMinutes(timeStringToMinutes(value)))
 
@@ -27,6 +28,7 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
   }
 
   const handleSave = async () => {
+    setError('')
     const startMin = snapMinutes(timeStringToMinutes(start))
     let endMin = snapMinutes(timeStringToMinutes(end))
     if (endMin <= startMin) endMin = startMin + settings.defaultDurationMinutes
@@ -40,14 +42,18 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
       repeat: repeat || null,
       notes: notes.trim(),
     }
-    if (isEdit) {
-      await updateEvent(record)
-      onSaved?.('Event updated')
-    } else {
-      await addEvent(record)
-      onSaved?.('Event added')
+    try {
+      if (isEdit) {
+        await updateEvent(record)
+        onSaved?.('Event updated')
+      } else {
+        await addEvent(record)
+        onSaved?.('Event added')
+      }
+      onClose()
+    } catch (err) {
+      setError(err.message || 'Could not save event')
     }
-    onClose()
   }
 
   const handleDelete = async () => {
@@ -143,6 +149,8 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
             </option>
           ))}
         </select>
+
+        {error && <p className="ai-assistant-error">{error}</p>}
 
         <div className="modal-actions">
           {isEdit && (

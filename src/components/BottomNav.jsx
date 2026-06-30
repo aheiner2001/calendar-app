@@ -1,10 +1,10 @@
 import { NavLink } from 'react-router-dom'
-import { CalendarIcon, HomeIcon, SyncIcon } from './icons.jsx'
+import { CalendarIcon, HomeIcon, PeopleIcon } from './icons.jsx'
 
 const ITEMS = [
   { to: '/', label: 'Home', Icon: HomeIcon, end: true },
   { to: '/calendar', label: 'Calendar', Icon: CalendarIcon },
-  { to: '/sync', label: 'Sync', Icon: SyncIcon },
+  { to: '/sync', label: 'Share', Icon: PeopleIcon },
 ]
 
 export default function BottomNav() {

@@ -7,6 +7,7 @@ import {
   signOut as firebaseSignOut,
 } from 'firebase/auth'
 import {
+  arrayRemove,
   arrayUnion,
   collection,
   deleteDoc,
@@ -19,9 +20,10 @@ import {
   where,
 } from 'firebase/firestore'
 import { auth, db, firebaseEnabled } from '../lib/firebase.js'
-import { DEFAULT_SETTINGS } from '../lib/settings.js'
+import { DEFAULT_SETTINGS, normalizeSettings } from '../lib/settings.js'
 import { seedEvents } from '../lib/seed.js'
-import { dateKey } from '../lib/time.js'
+import { dateKey, weekDays } from '../lib/time.js'
+import { blocksForDay } from '../lib/prioritySchedule.js'
 import {
   ALL_CALENDARS_ID,
   defaultPersonalCalendar,
@@ -30,7 +32,8 @@ import {
   inviteUrl,
   personalCalendarId,
 } from '../lib/calendars.js'
-import { migrate } from '../lib/events.js'
+import { migrate, toFirestoreEvent } from '../lib/events.js'
+import { eventsForDay } from '../lib/repeat.js'
 import {
   ACTIVE_CALENDAR_KEY,
   loadLocalCalendars,
@@ -63,7 +66,7 @@ function loadLocalEvents(uid) {
 function loadSettings() {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+    if (raw) return normalizeSettings(JSON.parse(raw))
   } catch {
     /* ignore */
   }
@@ -85,6 +88,8 @@ export function AppProvider({ children }) {
   const [syncState, setSyncState] = useState(firebaseEnabled ? 'syncing' : 'local')
   const [lastSynced, setLastSynced] = useState(null)
   const toastRef = useRef(null)
+  const pendingDeletesRef = useRef(new Set())
+  const pendingAddsRef = useRef(new Map())
   const [toast, setToast] = useState('')
 
   const uid = user?.uid ?? 'local'
@@ -141,6 +146,31 @@ export function AppProvider({ children }) {
     setSettings((s) => ({ ...s, savedColors: s.savedColors.filter((c) => c.id !== id) }))
   }, [])
 
+  const addPriorityBlock = useCallback(() => {
+    const id = `ps-${Date.now()}`
+    setSettings((s) => ({
+      ...s,
+      prioritySchedule: [
+        ...(s.prioritySchedule || []),
+        { id, label: 'Block', color: '#2ec4b6', days: [1, 2, 3, 4, 5], start: 540, end: 600 },
+      ],
+    }))
+  }, [])
+
+  const updatePriorityBlock = useCallback((id, patch) => {
+    setSettings((s) => ({
+      ...s,
+      prioritySchedule: (s.prioritySchedule || []).map((b) => (b.id === id ? { ...b, ...patch } : b)),
+    }))
+  }, [])
+
+  const deletePriorityBlock = useCallback((id) => {
+    setSettings((s) => ({
+      ...s,
+      prioritySchedule: (s.prioritySchedule || []).filter((b) => b.id !== id),
+    }))
+  }, [])
+
   useEffect(() => {
     if (!firebaseEnabled) {
       setAuthLoading(false)
@@ -184,6 +214,11 @@ export function AppProvider({ children }) {
         type: 'personal',
         createdAt: Date.now(),
       })
+      return
+    }
+    const members = snap.data().members
+    if (!Array.isArray(members) || !members.includes(u.uid)) {
+      await setDoc(ref, { members: arrayUnion(u.uid) }, { merge: true })
     }
   }, [])
 
@@ -213,25 +248,62 @@ export function AppProvider({ children }) {
     }
     if (!user) return
 
+    let cancelled = false
     let unsubCals = () => {}
+
+    const calendarsQuery = query(
+      collection(db, 'calendars'),
+      where('members', 'array-contains', user.uid),
+    )
+
+    const applyCalendars = (snapshot) => {
+      if (cancelled) return
+      const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
+      setCalendars(loaded.length > 0 ? loaded : [defaultPersonalCalendar(user.uid)])
+      setSyncState('synced')
+      setLastSynced(new Date())
+    }
 
     const boot = async () => {
       setSyncState('syncing')
-      await ensurePersonalCalendar(user)
-      await acceptEmailInvites(user)
+      setCalendars([defaultPersonalCalendar(user.uid)])
+      try {
+        try {
+          await ensurePersonalCalendar(user)
+        } catch (err) {
+          console.error('Personal calendar setup error:', err)
+        }
+        try {
+          await acceptEmailInvites(user)
+        } catch (err) {
+          console.error('Invite accept error:', err)
+        }
+        if (cancelled) return
 
-      unsubCals = onSnapshot(
-        query(collection(db, 'calendars'), where('members', 'array-contains', user.uid)),
-        (snapshot) => {
-          setCalendars(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })))
-        },
-        () => setSyncState('error'),
-      )
+        const snap = await getDocs(calendarsQuery)
+        applyCalendars(snap)
+
+        unsubCals = onSnapshot(
+          calendarsQuery,
+          applyCalendars,
+          (err) => {
+            console.error('Calendars listener error:', err)
+            if (!cancelled) setSyncState('error')
+          },
+        )
+      } catch (err) {
+        console.error('Calendar boot error:', err)
+        if (!cancelled) {
+          setCalendars([defaultPersonalCalendar(user.uid)])
+          setSyncState('error')
+        }
+      }
     }
 
     boot()
 
     return () => {
+      cancelled = true
       unsubCals()
     }
   }, [user, ensurePersonalCalendar, acceptEmailInvites])
@@ -239,13 +311,34 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (!firebaseEnabled || !user) return
 
-    const ids = calendars.map((c) => c.id).slice(0, 30)
-    if (ids.length === 0) return
+    const pid = personalCalendarId(user.uid)
+    const ids = [...new Set([pid, ...calendars.map((c) => c.id)])].slice(0, 30)
+
+    let cancelled = false
+    let unsubByCalendar = () => {}
+    let unsubLegacy = () => {}
 
     const mergeEvents = (byCalendar, legacy) => {
+      if (cancelled) return
+
+      const serverIds = new Set([...byCalendar, ...legacy].map((e) => e.id))
+      for (const id of pendingDeletesRef.current) {
+        if (!serverIds.has(id)) pendingDeletesRef.current.delete(id)
+      }
+      for (const id of pendingAddsRef.current.keys()) {
+        if (serverIds.has(id)) pendingAddsRef.current.delete(id)
+      }
+
       const map = new Map()
-      legacy.forEach((e) => map.set(e.id, e))
-      byCalendar.forEach((e) => map.set(e.id, e))
+      byCalendar.forEach((e) => {
+        if (!pendingDeletesRef.current.has(e.id)) map.set(e.id, e)
+      })
+      legacy.forEach((e) => {
+        if (!pendingDeletesRef.current.has(e.id)) map.set(e.id, e)
+      })
+      pendingAddsRef.current.forEach((e, id) => {
+        if (!map.has(id)) map.set(id, e)
+      })
       setAllEvents([...map.values()])
       setSyncState('synced')
       setLastSynced(new Date())
@@ -254,16 +347,33 @@ export function AppProvider({ children }) {
     let byCalendar = []
     let legacy = []
 
-    const unsubByCalendar = onSnapshot(
+    const loadEvents = async () => {
+      try {
+        const snap = await getDocs(query(collection(db, 'events'), where('calendarId', 'in', ids)))
+        if (!cancelled) {
+          byCalendar = snap.docs.map((d) => migrate({ id: d.id, ...d.data() }, user.uid))
+          mergeEvents(byCalendar, legacy)
+        }
+      } catch (err) {
+        console.error('Events load error:', err)
+      }
+    }
+
+    loadEvents()
+
+    unsubByCalendar = onSnapshot(
       query(collection(db, 'events'), where('calendarId', 'in', ids)),
       (snapshot) => {
         byCalendar = snapshot.docs.map((d) => migrate({ id: d.id, ...d.data() }, user.uid))
         mergeEvents(byCalendar, legacy)
       },
-      () => setSyncState('error'),
+      (err) => {
+        console.error('Events listener error:', err)
+        if (!cancelled) setSyncState('error')
+      },
     )
 
-    const unsubLegacy = onSnapshot(
+    unsubLegacy = onSnapshot(
       query(collection(db, 'events'), where('userId', '==', user.uid)),
       (snapshot) => {
         legacy = snapshot.docs
@@ -275,6 +385,7 @@ export function AppProvider({ children }) {
     )
 
     return () => {
+      cancelled = true
       unsubByCalendar()
       unsubLegacy()
     }
@@ -302,10 +413,18 @@ export function AppProvider({ children }) {
     async (event) => {
       const id = event.id || `evt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
       const calendarId = event.calendarId || writeCalendarId()
-      const record = { ...event, id, calendarId, userId: uid }
+      const record = toFirestoreEvent(event, id, calendarId, uid)
       if (firebaseEnabled) {
         if (!user) throw new Error('Not signed in')
-        await setDoc(doc(db, 'events', id), record)
+        pendingAddsRef.current.set(id, record)
+        setAllEvents((prev) => (prev.some((e) => e.id === id) ? prev : [...prev, record]))
+        try {
+          await setDoc(doc(db, 'events', id), record)
+        } catch (err) {
+          pendingAddsRef.current.delete(id)
+          setAllEvents((prev) => prev.filter((e) => e.id !== id))
+          throw err
+        }
       } else {
         setAllEvents((prev) => [...prev, record])
       }
@@ -317,10 +436,15 @@ export function AppProvider({ children }) {
   const updateEvent = useCallback(
     async (event) => {
       const calendarId = event.calendarId || writeCalendarId()
-      const record = { ...event, calendarId, userId: uid }
+      const record = toFirestoreEvent(event, event.id, calendarId, uid)
       if (firebaseEnabled) {
         if (!user) throw new Error('Not signed in')
-        await setDoc(doc(db, 'events', event.id), record)
+        setAllEvents((prev) => prev.map((e) => (e.id === event.id ? record : e)))
+        try {
+          await setDoc(doc(db, 'events', event.id), record)
+        } catch (err) {
+          throw err
+        }
       } else {
         setAllEvents((prev) => prev.map((e) => (e.id === event.id ? record : e)))
       }
@@ -330,13 +454,78 @@ export function AppProvider({ children }) {
 
   const deleteEvent = useCallback(
     async (id) => {
+      pendingDeletesRef.current.add(id)
+      setAllEvents((prev) => prev.filter((e) => e.id !== id))
       if (firebaseEnabled) {
-        await deleteDoc(doc(db, 'events', id))
-      } else {
-        setAllEvents((prev) => prev.filter((e) => e.id !== id))
+        try {
+          await deleteDoc(doc(db, 'events', id))
+        } catch (err) {
+          pendingDeletesRef.current.delete(id)
+          throw err
+        }
       }
     },
     [user],
+  )
+
+  const clearDay = useCallback(
+    async (dayKey) => {
+      const [y, m, d] = dayKey.split('-').map(Number)
+      const date = new Date(y, m - 1, d)
+      const visible = filterEventsByCalendar(allEvents, activeCalendarId, personalId)
+      const toRemove = eventsForDay(visible, date)
+      if (toRemove.length === 0) return 0
+
+      const ids = [...new Set(toRemove.map((e) => e.id))]
+      ids.forEach((id) => pendingDeletesRef.current.add(id))
+      setAllEvents((prev) => prev.filter((e) => !ids.includes(e.id)))
+
+      try {
+        if (firebaseEnabled) {
+          for (const id of ids) {
+            await deleteDoc(doc(db, 'events', id))
+          }
+        }
+      } catch (err) {
+        ids.forEach((id) => pendingDeletesRef.current.delete(id))
+        throw err
+      }
+      return ids.length
+    },
+    [allEvents, activeCalendarId, personalId, user],
+  )
+
+  const applyPriorityToWeek = useCallback(
+    async (weekDate = selectedDate) => {
+      const days = weekDays(weekDate)
+      const calId = writeCalendarId()
+      let count = 0
+      for (const day of days) {
+        for (const block of blocksForDay(settings, day)) {
+          const dk = dateKey(day)
+          const exists = allEvents.some(
+            (e) =>
+              e.day === dk &&
+              e.title === block.label &&
+              e.start === block.start &&
+              (e.calendarId === calId || !e.calendarId),
+          )
+          if (!exists) {
+            await addEvent({
+              title: block.label,
+              day: dk,
+              start: block.start,
+              end: block.end,
+              color: block.color,
+              calendarId: calId,
+            })
+            count++
+          }
+        }
+      }
+      return count
+    },
+    [settings, allEvents, addEvent, writeCalendarId, selectedDate],
   )
 
   const createSharedCalendar = useCallback(
@@ -388,7 +577,9 @@ export function AppProvider({ children }) {
         permanent: true,
         expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
       })
-      return { id, ...cal }
+      const newCal = { id, ...cal }
+      setCalendars((prev) => (prev.some((c) => c.id === id) ? prev : [...prev, newCal]))
+      return newCal
     },
     [user, uid],
   )
@@ -501,14 +692,74 @@ export function AppProvider({ children }) {
       const calRef = doc(db, 'calendars', inv.calendarId)
       const calSnap = await getDoc(calRef)
       if (!calSnap.exists()) throw new Error('Calendar no longer exists')
-      const members = calSnap.data().members || []
+      const calData = calSnap.data()
+      const members = calData.members || []
       if (!members.includes(user.uid)) {
         await setDoc(calRef, { members: arrayUnion(user.uid) }, { merge: true })
       }
+      const joinedCal = {
+        id: inv.calendarId,
+        ...calData,
+        members: members.includes(user.uid) ? members : [...members, user.uid],
+      }
+      setCalendars((prev) => {
+        if (prev.some((c) => c.id === joinedCal.id)) {
+          return prev.map((c) => (c.id === joinedCal.id ? joinedCal : c))
+        }
+        return [...prev, joinedCal]
+      })
       if (!inv.email && !inv.permanent) await deleteDoc(invDoc.ref)
       return inv.calendarName
     },
     [user, uid],
+  )
+
+  const deleteCalendar = useCallback(
+    async (calendarId) => {
+      const cal = calendars.find((c) => c.id === calendarId)
+      if (!cal) throw new Error('Calendar not found')
+      if (cal.type === 'personal') throw new Error('Cannot delete your personal calendar')
+
+      const isOwner = cal.ownerId === uid
+      const clearActive = () => {
+        if (activeCalendarId === calendarId) setActiveCalendarId(ALL_CALENDARS_ID)
+      }
+
+      if (!firebaseEnabled || !user) {
+        if (isOwner) {
+          setCalendars((prev) => prev.filter((c) => c.id !== calendarId))
+          setAllEvents((prev) => prev.filter((e) => e.calendarId !== calendarId))
+          saveLocalInvites(loadLocalInvites().filter((i) => i.calendarId !== calendarId))
+        } else {
+          setCalendars((prev) => prev.filter((c) => c.id !== calendarId))
+        }
+        clearActive()
+        return
+      }
+
+      if (!isOwner) {
+        await setDoc(doc(db, 'calendars', calendarId), { members: arrayRemove(user.uid) }, { merge: true })
+        setCalendars((prev) => prev.filter((c) => c.id !== calendarId))
+        clearActive()
+        return
+      }
+
+      const [inviteSnap, eventSnap] = await Promise.all([
+        getDocs(query(collection(db, 'invites'), where('calendarId', '==', calendarId))),
+        getDocs(query(collection(db, 'events'), where('calendarId', '==', calendarId))),
+      ])
+
+      await Promise.all([
+        ...inviteSnap.docs.map((d) => deleteDoc(d.ref)),
+        ...eventSnap.docs.map((d) => deleteDoc(d.ref)),
+        deleteDoc(doc(db, 'calendars', calendarId)),
+      ])
+
+      setCalendars((prev) => prev.filter((c) => c.id !== calendarId))
+      setAllEvents((prev) => prev.filter((e) => e.calendarId !== calendarId))
+      clearActive()
+    },
+    [calendars, user, uid, activeCalendarId],
   )
 
   const value = useMemo(
@@ -524,16 +775,23 @@ export function AppProvider({ children }) {
       addColor,
       updateColor,
       deleteColor,
+      addPriorityBlock,
+      updatePriorityBlock,
+      deletePriorityBlock,
+      applyPriorityToWeek,
       events,
       allEvents,
       calendars,
       activeCalendarId,
       setActiveCalendarId,
       personalCalendarId: personalId,
+      writeCalendarId,
       addEvent,
       updateEvent,
       deleteEvent,
+      clearDay,
       createSharedCalendar,
+      deleteCalendar,
       createInvite,
       joinByInviteCode,
       ensureCalendarShareCode,
@@ -558,15 +816,22 @@ export function AppProvider({ children }) {
       addColor,
       updateColor,
       deleteColor,
+      addPriorityBlock,
+      updatePriorityBlock,
+      deletePriorityBlock,
+      applyPriorityToWeek,
       events,
       allEvents,
       calendars,
       activeCalendarId,
       personalId,
+      writeCalendarId,
       addEvent,
       updateEvent,
       deleteEvent,
+      clearDay,
       createSharedCalendar,
+      deleteCalendar,
       createInvite,
       joinByInviteCode,
       ensureCalendarShareCode,

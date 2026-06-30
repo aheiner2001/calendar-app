@@ -2,57 +2,105 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isMember(calendarId) {
-      return request.auth != null
-        && request.auth.uid in get(/databases/$(database)/documents/calendars/$(calendarId)).data.members;
+    function personalCal(uid) {
+      return 'personal-' + uid;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function calendarDoc(calendarId) {
+      return get(/databases/$(database)/documents/calendars/$(calendarId));
+    }
+
+    function isPersonalCalendar(calendarId) {
+      return isSignedIn() && calendarId == personalCal(request.auth.uid);
+    }
+
+    function isCalendarMember(calendarId) {
+      return isSignedIn() && (
+        isPersonalCalendar(calendarId)
+        || (
+          exists(/databases/$(database)/documents/calendars/$(calendarId))
+          && calendarDoc(calendarId).data.ownerId == request.auth.uid
+        )
+        || (
+          exists(/databases/$(database)/documents/calendars/$(calendarId))
+          && calendarDoc(calendarId).data.keys().hasAll(['members'])
+          && calendarDoc(calendarId).data.members is list
+          && calendarDoc(calendarId).data.members.hasAny([request.auth.uid])
+        )
+      );
+    }
+
+    function isCalendarOwner(calendarId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/calendars/$(calendarId))
+        && calendarDoc(calendarId).data.ownerId == request.auth.uid;
     }
 
     match /calendars/{calendarId} {
-      allow read: if request.auth != null
-        && request.auth.uid in resource.data.members;
+      allow read: if isSignedIn() && (
+        isPersonalCalendar(calendarId)
+        || resource.data.ownerId == request.auth.uid
+        || (
+          resource.data.keys().hasAll(['members'])
+          && resource.data.members is list
+          && resource.data.members.hasAny([request.auth.uid])
+        )
+      );
 
-      allow create: if request.auth != null
+      allow create: if isSignedIn()
         && request.resource.data.ownerId == request.auth.uid
-        && request.auth.uid in request.resource.data.members;
+        && request.resource.data.members is list
+        && request.resource.data.members.hasAny([request.auth.uid]);
 
-      allow update: if request.auth != null
-        && request.auth.uid in resource.data.members;
+      allow update: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid
+        || (
+          resource.data.keys().hasAll(['members'])
+          && resource.data.members is list
+          && resource.data.members.hasAny([request.auth.uid])
+        )
+      );
 
-      allow delete: if request.auth != null
-        && resource.data.ownerId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
     }
 
     match /invites/{inviteId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
         && request.resource.data.createdBy == request.auth.uid;
-      allow delete: if request.auth != null
+      allow delete: if isSignedIn()
         && (resource.data.createdBy == request.auth.uid
           || (resource.data.email != null && request.auth.token.email == resource.data.email));
     }
 
     match /events/{eventId} {
-      allow read: if request.auth != null && (
-        (resource.data.keys().hasAll(['calendarId']) && isMember(resource.data.calendarId))
-        || (!resource.data.keys().hasAll(['calendarId']) && resource.data.userId == request.auth.uid)
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid
+        || (resource.data.keys().hasAll(['calendarId']) && isCalendarMember(resource.data.calendarId))
       );
 
-      allow create: if request.auth != null
+      allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.keys().hasAll(['title', 'day', 'start', 'end', 'color', 'calendarId'])
-        && isMember(request.resource.data.calendarId);
+        && isCalendarMember(request.resource.data.calendarId);
 
-      allow update: if request.auth != null
+      allow update: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
-        && isMember(request.resource.data.calendarId);
+        && isCalendarMember(request.resource.data.calendarId);
 
-      allow delete: if request.auth != null
-        && resource.data.userId == request.auth.uid
-        && isMember(resource.data.calendarId);
+      // Owners can delete their own events; calendar owners can delete any event on that calendar
+      allow delete: if isSignedIn() && (
+        resource.data.userId == request.auth.uid
+        || (resource.data.keys().hasAll(['calendarId']) && isCalendarOwner(resource.data.calendarId))
+      );
     }
 
     match /users/{userId}/settings/{docId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
   }
 }

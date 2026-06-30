@@ -11,3 +11,22 @@ export function migrate(event, uid) {
   if (!e.calendarId && uid) e = { ...e, calendarId: personalCalendarId(uid) }
   return e
 }
+
+/** Strip undefined fields — Firestore rejects undefined values. */
+export function toFirestoreEvent(event, id, calendarId, userId) {
+  const record = {
+    id,
+    title: event.title,
+    day: event.day,
+    start: event.start,
+    end: event.end,
+    color: event.color,
+    calendarId,
+    userId,
+  }
+  const notes = event.notes?.trim()
+  if (notes) record.notes = notes
+  const repeat = normalizeRepeat(event.repeat)
+  if (repeat) record.repeat = repeat
+  return record
+}

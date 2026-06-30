@@ -28,7 +28,7 @@ const LONG_PRESS_MS = 380
 const LONG_PRESS_TOUCH_MS = 480
 
 export default function Calendar() {
-  const { events, selectedDate, setSelectedDate, settings, updateEvent, showToast, calendarView, setCalendarView } = useApp()
+  const { events, selectedDate, setSelectedDate, settings, updateEvent, deleteEvent, clearDay, showToast, calendarView, setCalendarView } = useApp()
   const [modalOpen, setModalOpen] = useState(false)
   const [viewing, setViewing] = useState(null)
   const [editing, setEditing] = useState(null)
@@ -73,6 +73,25 @@ export default function Calendar() {
     () => layoutEvents(eventsForDay(events, selectedDate)),
     [events, selectedDate],
   )
+
+  const dayEventCount = dayEvents.length
+  const hasRepeatingOnDay = useMemo(
+    () => eventsForDay(events, selectedDate).some((e) => e.repeat),
+    [events, selectedDate],
+  )
+
+  const handleClearDay = async () => {
+    if (dayEventCount === 0) return
+    let msg = `Remove all ${dayEventCount} event${dayEventCount > 1 ? 's' : ''} on this day?`
+    if (hasRepeatingOnDay) msg += ' Repeating events will be removed entirely.'
+    if (!window.confirm(msg)) return
+    try {
+      const n = await clearDay(selectedKey)
+      showToast(n ? `Cleared ${n} event${n > 1 ? 's' : ''}` : 'Day is already empty')
+    } catch (err) {
+      showToast(err.message || 'Could not clear day')
+    }
+  }
 
   const clampMinutes = (m) =>
     Math.max(GRID_START_HOUR * 60, Math.min(GRID_END_HOUR * 60, m))
@@ -353,6 +372,17 @@ export default function Calendar() {
 
   return (
     <div className="page">
+      <div className="calendar-toolbar">
+        <button
+          type="button"
+          className="btn btn-ghost clear-day-btn"
+          onClick={handleClearDay}
+          disabled={dayEventCount === 0}
+        >
+          Clear day{dayEventCount > 0 ? ` (${dayEventCount})` : ''}
+        </button>
+      </div>
+
       {calendarView === 'day' && (
         <div className="week-strip">
           {week.map((d) => {
