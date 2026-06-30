@@ -1,7 +1,9 @@
 import { EditIcon, RepeatIcon } from './icons.jsx'
+import { repeatLabel } from '../lib/repeat.js'
 
 export default function EventDetailModal({ event, onClose, onEdit }) {
   const notes = event.notes?.trim()
+  const recurring = repeatLabel(event.repeat)
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -9,12 +11,14 @@ export default function EventDetailModal({ event, onClose, onEdit }) {
         <div className="event-detail-header">
           <h3>
             {event.title}
-            {event.repeat && <RepeatIcon className="repeat-icon" />}
+            {recurring && <RepeatIcon className="repeat-icon" title={recurring} />}
           </h3>
           <button type="button" className="event-detail-edit" onClick={onEdit} aria-label="Edit event">
             <EditIcon />
           </button>
         </div>
+
+        {recurring && <div className="event-detail-repeat">{recurring}</div>}
 
         {notes ? (
           <div className="event-detail-notes">{notes}</div>

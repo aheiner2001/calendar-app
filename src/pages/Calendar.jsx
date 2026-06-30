@@ -5,6 +5,7 @@ import EventDetailModal from '../components/EventDetailModal.jsx'
 import WeekCalendar from '../components/WeekCalendar.jsx'
 import { PlusIcon, RepeatIcon } from '../components/icons.jsx'
 import { layoutEvents } from '../lib/layout.js'
+import { eventsForDay } from '../lib/repeat.js'
 import { colorFill } from '../lib/settings.js'
 import {
   GRID_END_HOUR,
@@ -50,8 +51,8 @@ export default function Calendar() {
   }, [])
 
   const dayEvents = useMemo(
-    () => layoutEvents(events.filter((e) => e.day === selectedKey)),
-    [events, selectedKey],
+    () => layoutEvents(eventsForDay(events, selectedDate)),
+    [events, selectedDate],
   )
 
   const clampMinutes = (m) =>
@@ -134,11 +135,9 @@ export default function Calendar() {
   // Short tap -> detail view. Hold without moving -> resize handles on release.
   // Hold and drag (finger still down) -> move the whole block.
   const onEventPointerDown = (e, ev) => {
-    e.stopPropagation()
     if (resizeId === ev.id) return
 
     const el = e.currentTarget
-    el.setPointerCapture(e.pointerId)
 
     const session = {
       ev,
@@ -157,10 +156,12 @@ export default function Calendar() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
-      try {
-        el.releasePointerCapture(session.pointerId)
-      } catch {
-        /* already released */
+      if (session.longPressed) {
+        try {
+          el.releasePointerCapture(session.pointerId)
+        } catch {
+          /* already released */
+        }
       }
     }
 
@@ -169,8 +170,8 @@ export default function Calendar() {
 
       if (!session.longPressed) {
         if (Math.abs(me.clientY - session.startY) > MOVE_CANCEL_PX) {
-          clearTimeout(session.timer)
           session.cancelled = true
+          cleanup()
         }
         return
       }
@@ -185,7 +186,10 @@ export default function Calendar() {
       cleanup()
 
       if (!session.longPressed) {
-        if (!session.cancelled) openDetail(ev)
+        if (!session.cancelled) {
+          me.stopPropagation()
+          openDetail(ev)
+        }
         return
       }
 
@@ -206,6 +210,11 @@ export default function Calendar() {
 
     session.timer = setTimeout(() => {
       session.longPressed = true
+      try {
+        el.setPointerCapture(session.pointerId)
+      } catch {
+        /* ignore */
+      }
       setMoveId(ev.id)
       setDraft({ id: ev.id, start: ev.start, end: ev.end })
       showToast('Drag to move')
@@ -351,7 +360,7 @@ export default function Calendar() {
 
       {modalOpen && (
         <AddEventModal
-          dayKey={selectedKey}
+          dayKey={editing?.day ?? selectedKey}
           editing={editing}
           initialStart={newSlot?.start}
           initialEnd={newSlot?.end}

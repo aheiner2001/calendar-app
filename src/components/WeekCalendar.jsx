@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { layoutEvents } from '../lib/layout.js'
+import { eventsForDay } from '../lib/repeat.js'
 import { colorFill } from '../lib/settings.js'
 import {
   GRID_START_HOUR,
@@ -19,7 +20,7 @@ export default function WeekCalendar({ events, week, selectedDate, onSelectDay, 
     const map = {}
     week.forEach((d) => {
       const key = dateKey(d)
-      map[key] = layoutEvents(events.filter((e) => e.day === key))
+      map[key] = layoutEvents(eventsForDay(events, d))
     })
     return map
   }, [events, week])

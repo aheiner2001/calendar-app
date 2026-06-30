@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
+import { REPEAT_OPTIONS, normalizeRepeat } from '../lib/repeat.js'
 import { minutesToTimeString, snapMinutes, timeStringToMinutes } from '../lib/time.js'
 
 export default function AddEventModal({ dayKey, editing, initialStart, initialEnd, onClose, onSaved }) {
@@ -15,7 +16,7 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
   const [color, setColor] = useState(editing?.color ?? fallbackColor)
   const [start, setStart] = useState(minutesToTimeString(snapMinutes(defaultStart)))
   const [end, setEnd] = useState(minutesToTimeString(snapMinutes(defaultEnd)))
-  const [repeat, setRepeat] = useState(editing?.repeat ?? false)
+  const [repeat, setRepeat] = useState(() => normalizeRepeat(editing?.repeat) || '')
   const [notes, setNotes] = useState(editing?.notes ?? '')
 
   const snapTime = (value) => minutesToTimeString(snapMinutes(timeStringToMinutes(value)))
@@ -31,7 +32,7 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
       start: startMin,
       end: endMin,
       color,
-      repeat,
+      repeat: repeat || null,
       notes: notes.trim(),
     }
     if (isEdit) {
@@ -110,10 +111,14 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
           rows={3}
         />
 
-        <label className="checkbox-row">
-          <input type="checkbox" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} />
-          Repeats
-        </label>
+        <label>Repeat</label>
+        <select value={repeat} onChange={(e) => setRepeat(e.target.value)}>
+          {REPEAT_OPTIONS.map((opt) => (
+            <option key={opt.value || 'none'} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
 
         <div className="modal-actions">
           {isEdit && (

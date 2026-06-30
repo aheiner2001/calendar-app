@@ -19,6 +19,7 @@ import { auth, db, firebaseEnabled } from '../lib/firebase.js'
 import { DEFAULT_SETTINGS } from '../lib/settings.js'
 import { seedEvents } from '../lib/seed.js'
 import { dateKey } from '../lib/time.js'
+import { normalizeRepeat } from '../lib/repeat.js'
 
 const AppContext = createContext(null)
 
@@ -30,8 +31,11 @@ const VIEW_KEY = 'calendar-view'
 // Legacy events stored a named category; map it to a hex color.
 const CATEGORY_TO_COLOR = { pink: '#c2447a', purple: '#8b6fc9', yellow: '#d9a73d' }
 function migrate(event) {
-  if (event.color) return event
-  return { ...event, color: CATEGORY_TO_COLOR[event.category] || '#8b6fc9' }
+  let e = event
+  if (!event.color) e = { ...e, color: CATEGORY_TO_COLOR[event.category] || '#8b6fc9' }
+  const repeat = normalizeRepeat(e.repeat)
+  if (repeat !== e.repeat) e = { ...e, repeat }
+  return e
 }
 
 function loadLocalEvents() {

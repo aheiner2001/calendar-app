@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext.jsx'
+import { eventsForDay } from '../lib/repeat.js'
 import { dateKey, formatRange } from '../lib/time.js'
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -21,8 +22,8 @@ export default function Home() {
   const isToday = dateKey(new Date()) === todayKey
 
   const todays = useMemo(
-    () => events.filter((e) => e.day === todayKey).sort((a, b) => a.start - b.start),
-    [events, todayKey],
+    () => eventsForDay(events, selectedDate).sort((a, b) => a.start - b.start),
+    [events, selectedDate],
   )
 
   const upNext = useMemo(() => {
