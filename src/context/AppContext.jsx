@@ -342,6 +342,7 @@ export function AppProvider({ children }) {
   const createSharedCalendar = useCallback(
     async (name) => {
       const trimmed = name.trim() || 'Shared calendar'
+      const shareCode = generateInviteCode()
       if (!firebaseEnabled || !user) {
         const id = `shared-${Date.now()}`
         const cal = {
@@ -350,9 +351,22 @@ export function AppProvider({ children }) {
           ownerId: uid,
           members: [uid],
           type: 'shared',
+          shareCode,
           createdAt: Date.now(),
         }
         setCalendars((prev) => [...prev, cal])
+        const invites = loadLocalInvites()
+        invites.push({
+          id: `inv-${id}`,
+          code: shareCode,
+          calendarId: id,
+          calendarName: trimmed,
+          createdBy: uid,
+          email: null,
+          permanent: true,
+          expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
+        })
+        saveLocalInvites(invites)
         return cal
       }
       const id = `shared-${Date.now()}`
@@ -361,12 +375,66 @@ export function AppProvider({ children }) {
         ownerId: user.uid,
         members: [user.uid],
         type: 'shared',
+        shareCode,
         createdAt: Date.now(),
       }
       await setDoc(doc(db, 'calendars', id), cal)
+      await setDoc(doc(db, 'invites', `share-${id}`), {
+        code: shareCode,
+        calendarId: id,
+        calendarName: trimmed,
+        createdBy: user.uid,
+        email: null,
+        permanent: true,
+        expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
+      })
       return { id, ...cal }
     },
     [user, uid],
+  )
+
+  const ensureCalendarShareCode = useCallback(
+    async (calendarId) => {
+      const cal = calendars.find((c) => c.id === calendarId)
+      if (!cal || cal.type !== 'shared') return null
+
+      if (cal.shareCode) {
+        return { code: cal.shareCode, url: inviteUrl(cal.shareCode) }
+      }
+
+      const shareCode = generateInviteCode()
+      if (!firebaseEnabled || !user) {
+        setCalendars((prev) =>
+          prev.map((c) => (c.id === calendarId ? { ...c, shareCode } : c)),
+        )
+        const invites = loadLocalInvites()
+        invites.push({
+          id: `inv-share-${calendarId}`,
+          code: shareCode,
+          calendarId,
+          calendarName: cal.name,
+          createdBy: uid,
+          email: null,
+          permanent: true,
+          expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
+        })
+        saveLocalInvites(invites)
+        return { code: shareCode, url: inviteUrl(shareCode) }
+      }
+
+      await setDoc(doc(db, 'calendars', calendarId), { shareCode }, { merge: true })
+      await setDoc(doc(db, 'invites', `share-${calendarId}`), {
+        code: shareCode,
+        calendarId,
+        calendarName: cal.name,
+        createdBy: user.uid,
+        email: null,
+        permanent: true,
+        expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
+      })
+      return { code: shareCode, url: inviteUrl(shareCode) }
+    },
+    [calendars, user, uid],
   )
 
   const createInvite = useCallback(
@@ -437,7 +505,7 @@ export function AppProvider({ children }) {
       if (!members.includes(user.uid)) {
         await setDoc(calRef, { members: arrayUnion(user.uid) }, { merge: true })
       }
-      if (!inv.email) await deleteDoc(invDoc.ref)
+      if (!inv.email && !inv.permanent) await deleteDoc(invDoc.ref)
       return inv.calendarName
     },
     [user, uid],
@@ -468,6 +536,7 @@ export function AppProvider({ children }) {
       createSharedCalendar,
       createInvite,
       joinByInviteCode,
+      ensureCalendarShareCode,
       user,
       authLoading,
       signInWithGoogle,
@@ -500,6 +569,7 @@ export function AppProvider({ children }) {
       createSharedCalendar,
       createInvite,
       joinByInviteCode,
+      ensureCalendarShareCode,
       user,
       authLoading,
       signInWithGoogle,

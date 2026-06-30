@@ -18,14 +18,18 @@ export default function AppBar() {
 
   return (
     <div className="app-bar">
-      <div className="left">
-        <CalendarPicker />
+      <div className="app-bar-left">
         <button type="button" className="date-select" onClick={() => setDatePickerOpen(true)}>
           {label}
           <CaretDownIcon />
         </button>
       </div>
-      <div className="right">
+
+      <div className="app-bar-center">
+        <CalendarPicker />
+      </div>
+
+      <div className="app-bar-right">
         {onCalendar && (
           <button
             type="button"
