@@ -150,7 +150,7 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
           ))}
         </select>
 
-        {error && <p className="ai-assistant-error">{error}</p>}
+        {error && <p className="modal-field-error">{error}</p>}
 
         <div className="modal-actions">
           {isEdit && (

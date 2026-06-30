@@ -11,10 +11,6 @@ export const DEFAULT_SETTINGS = {
     { id: 'meeting', label: 'Meeting', color: '#c2447a' },
     { id: 'study', label: 'Study', color: '#5aa9e6' },
   ],
-  // Weekly baseline blocks the AI should respect (days: 0=Sun … 6=Sat)
-  prioritySchedule: [
-    { id: 'ps-work', label: 'Work', color: '#5aa9e6', days: [1, 2, 3, 4, 5], start: 540, end: 1020 },
-  ],
 }
 
 export function colorFill(hex, alpha = 0.22) {
@@ -29,6 +25,5 @@ export function colorFill(hex, alpha = 0.22) {
 export function normalizeSettings(raw) {
   const merged = { ...DEFAULT_SETTINGS, ...raw }
   if (!Array.isArray(merged.savedColors)) merged.savedColors = DEFAULT_SETTINGS.savedColors
-  if (!Array.isArray(merged.prioritySchedule)) merged.prioritySchedule = []
   return merged
 }

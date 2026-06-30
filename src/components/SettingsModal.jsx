@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import { ALL_CALENDARS_ID } from '../lib/calendars.js'
 import { useInviteQr } from '../lib/qr.js'
-import PriorityScheduleEditor from './PriorityScheduleEditor.jsx'
 
 export default function SettingsModal({ onClose }) {
   const { settings, addColor, updateColor, deleteColor, activeCalendarId, calendars, ensureCalendarShareCode } =
@@ -100,8 +99,6 @@ export default function SettingsModal({ onClose }) {
         <button className="add-color-btn" onClick={addColor}>
           + Add preset
         </button>
-
-        <PriorityScheduleEditor />
 
         <div className="modal-actions">
           <button className="btn btn-primary" onClick={onClose}>

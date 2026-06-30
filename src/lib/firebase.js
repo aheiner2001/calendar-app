@@ -2,7 +2,6 @@ import { initializeApp } from 'firebase/app'
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { getAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
-import { getAI, getGenerativeModel, GoogleAIBackend } from 'firebase/ai'
 
 const config = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -15,13 +14,11 @@ const config = {
 
 export const firebaseEnabled = Boolean(config.apiKey && config.projectId)
 
-const geminiModelName = import.meta.env.VITE_GEMINI_MODEL || 'gemini-2.5-flash-lite'
 const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY
 
 let app = null
 let db = null
 let auth = null
-let geminiModel = null
 
 if (firebaseEnabled) {
   app = initializeApp(config)
@@ -46,16 +43,7 @@ if (firebaseEnabled) {
         'set App Check to Monitor (not Enforce) in Firebase Console → App Check.',
     )
   }
-
-  try {
-    const ai = getAI(app, { backend: new GoogleAIBackend() })
-    geminiModel = getGenerativeModel(ai, { model: geminiModelName })
-  } catch (err) {
-    console.warn('Firebase AI Logic is not available:', err)
-  }
 }
 
 export const appCheckEnabled = Boolean(recaptchaSiteKey)
-export const aiEnabled = Boolean(geminiModel)
-export const geminiModelNameUsed = geminiModelName
-export { db, auth, app, geminiModel }
+export { db, auth, app }

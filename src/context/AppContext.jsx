@@ -13,6 +13,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   onSnapshot,
   query,
@@ -22,8 +23,7 @@ import {
 import { auth, db, firebaseEnabled } from '../lib/firebase.js'
 import { DEFAULT_SETTINGS, normalizeSettings } from '../lib/settings.js'
 import { seedEvents } from '../lib/seed.js'
-import { dateKey, weekDays } from '../lib/time.js'
-import { blocksForDay } from '../lib/prioritySchedule.js'
+import { dateKey } from '../lib/time.js'
 import {
   ALL_CALENDARS_ID,
   defaultPersonalCalendar,
@@ -36,8 +36,10 @@ import { migrate, toFirestoreEvent } from '../lib/events.js'
 import { eventsForDay } from '../lib/repeat.js'
 import {
   ACTIVE_CALENDAR_KEY,
+  loadCloudCalendars,
   loadLocalCalendars,
   loadLocalInvites,
+  saveCloudCalendars,
   saveLocalCalendars,
   saveLocalInvites,
   SETTINGS_KEY,
@@ -145,31 +147,6 @@ export function AppProvider({ children }) {
 
   const deleteColor = useCallback((id) => {
     setSettings((s) => ({ ...s, savedColors: s.savedColors.filter((c) => c.id !== id) }))
-  }, [])
-
-  const addPriorityBlock = useCallback(() => {
-    const id = `ps-${Date.now()}`
-    setSettings((s) => ({
-      ...s,
-      prioritySchedule: [
-        ...(s.prioritySchedule || []),
-        { id, label: 'Block', color: '#2ec4b6', days: [1, 2, 3, 4, 5], start: 540, end: 600 },
-      ],
-    }))
-  }, [])
-
-  const updatePriorityBlock = useCallback((id, patch) => {
-    setSettings((s) => ({
-      ...s,
-      prioritySchedule: (s.prioritySchedule || []).map((b) => (b.id === id ? { ...b, ...patch } : b)),
-    }))
-  }, [])
-
-  const deletePriorityBlock = useCallback((id) => {
-    setSettings((s) => ({
-      ...s,
-      prioritySchedule: (s.prioritySchedule || []).filter((b) => b.id !== id),
-    }))
   }, [])
 
   useEffect(() => {
@@ -286,6 +263,16 @@ export function AppProvider({ children }) {
 
     const boot = async () => {
       setSyncState('syncing')
+
+      const cached = loadCloudCalendars(user.uid)
+      if (cached?.length) {
+        const map = new Map()
+        cached.forEach((cal) => map.set(cal.id, cal))
+        const pid = personalCalendarId(user.uid)
+        if (!map.has(pid)) map.set(pid, defaultPersonalCalendar(user.uid))
+        setCalendars([...map.values()])
+      }
+
       try {
         try {
           await ensurePersonalCalendar(user)
@@ -302,6 +289,24 @@ export function AppProvider({ children }) {
         const [memberSnap, ownerSnap] = await Promise.all([getDocs(memberQuery), getDocs(ownerQuery)])
         memberCals = memberSnap.docs.map(docToCal)
         ownerCals = ownerSnap.docs.map(docToCal)
+
+        const serverIds = new Set([...memberCals, ...ownerCals].map((c) => c.id))
+        const cachedCals = loadCloudCalendars(user.uid) || []
+        const missing = cachedCals.filter((c) => c.type !== 'personal' && !serverIds.has(c.id))
+        if (missing.length) {
+          const extras = await Promise.all(
+            missing.map(async (c) => {
+              try {
+                const snap = await getDoc(doc(db, 'calendars', c.id))
+                return snap.exists() ? docToCal(snap) : null
+              } catch {
+                return null
+              }
+            }),
+          )
+          extras.filter(Boolean).forEach((cal) => ownerCals.push(cal))
+        }
+
         mergeCalendars()
 
         unsubMember = onSnapshot(
@@ -432,8 +437,12 @@ export function AppProvider({ children }) {
     if (!firebaseEnabled) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(allEvents))
       saveLocalCalendars(calendars)
+      return
     }
-  }, [allEvents, calendars])
+    if (user && calendars.length) {
+      saveCloudCalendars(user.uid, calendars)
+    }
+  }, [allEvents, calendars, user])
 
   const showToast = useCallback((msg) => {
     setToast(msg)
@@ -532,39 +541,6 @@ export function AppProvider({ children }) {
     [allEvents, activeCalendarId, personalId, user],
   )
 
-  const applyPriorityToWeek = useCallback(
-    async (weekDate = selectedDate) => {
-      const days = weekDays(weekDate)
-      const calId = writeCalendarId()
-      let count = 0
-      for (const day of days) {
-        for (const block of blocksForDay(settings, day)) {
-          const dk = dateKey(day)
-          const exists = allEvents.some(
-            (e) =>
-              e.day === dk &&
-              e.title === block.label &&
-              e.start === block.start &&
-              (e.calendarId === calId || !e.calendarId),
-          )
-          if (!exists) {
-            await addEvent({
-              title: block.label,
-              day: dk,
-              start: block.start,
-              end: block.end,
-              color: block.color,
-              calendarId: calId,
-            })
-            count++
-          }
-        }
-      }
-      return count
-    },
-    [settings, allEvents, addEvent, writeCalendarId, selectedDate],
-  )
-
   const createSharedCalendar = useCallback(
     async (name) => {
       const trimmed = name.trim() || 'Shared calendar'
@@ -605,6 +581,20 @@ export function AppProvider({ children }) {
         createdAt: Date.now(),
       }
       await setDoc(doc(db, 'calendars', id), cal)
+      try {
+        const verified = await getDocFromServer(doc(db, 'calendars', id))
+        if (!verified.exists()) {
+          throw new Error('Calendar was not saved to the cloud. Please try again.')
+        }
+      } catch (err) {
+        const msg = String(err?.message || err?.code || '')
+        if (msg.includes('permission') || err?.code === 'permission-denied') {
+          throw new Error(
+            'Could not save calendar. Set App Check to Monitor (not Enforce) in Firebase Console, or add VITE_RECAPTCHA_SITE_KEY to .env.',
+          )
+        }
+        throw err
+      }
       await setDoc(doc(db, 'invites', `share-${id}`), {
         code: shareCode,
         calendarId: id,
@@ -816,10 +806,6 @@ export function AppProvider({ children }) {
       addColor,
       updateColor,
       deleteColor,
-      addPriorityBlock,
-      updatePriorityBlock,
-      deletePriorityBlock,
-      applyPriorityToWeek,
       events,
       allEvents,
       calendars,
@@ -857,10 +843,6 @@ export function AppProvider({ children }) {
       addColor,
       updateColor,
       deleteColor,
-      addPriorityBlock,
-      updatePriorityBlock,
-      deletePriorityBlock,
-      applyPriorityToWeek,
       events,
       allEvents,
       calendars,

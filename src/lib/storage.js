@@ -17,6 +17,10 @@ const CALENDARS_KEY = 'calendar-calendars'
 const INVITES_KEY = 'calendar-invites'
 const ACTIVE_CALENDAR_KEY = 'calendar-active-id'
 
+function cloudCalendarsKey(uid) {
+  return `${CALENDARS_KEY}-${uid}`
+}
+
 function loadLocalCalendars(uid) {
   try {
     const raw = localStorage.getItem(CALENDARS_KEY)
@@ -30,6 +34,22 @@ function loadLocalCalendars(uid) {
 
 function saveLocalCalendars(calendars) {
   localStorage.setItem(CALENDARS_KEY, JSON.stringify(calendars))
+}
+
+function loadCloudCalendars(uid) {
+  if (!uid || uid === 'local') return null
+  try {
+    const raw = localStorage.getItem(cloudCalendarsKey(uid))
+    if (raw) return JSON.parse(raw)
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+function saveCloudCalendars(uid, calendars) {
+  if (!uid || uid === 'local') return
+  localStorage.setItem(cloudCalendarsKey(uid), JSON.stringify(calendars))
 }
 
 function loadLocalInvites() {
@@ -61,6 +81,8 @@ export {
   ACTIVE_CALENDAR_KEY,
   loadLocalCalendars,
   saveLocalCalendars,
+  loadCloudCalendars,
+  saveCloudCalendars,
   loadLocalInvites,
   saveLocalInvites,
   defaultPersonalCalendar,

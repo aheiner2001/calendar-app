@@ -85,8 +85,8 @@ export default function Sync() {
       setSharedName('')
       setActiveCalendarId(cal.id)
       showToast(`Created "${cal.name}"`)
-    } catch {
-      showToast('Could not create calendar')
+    } catch (err) {
+      showToast(err.message || 'Could not create calendar')
     } finally {
       setBusy(false)
     }
