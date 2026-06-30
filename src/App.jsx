@@ -22,11 +22,13 @@ export default function App() {
   return (
     <div className="app-shell">
       <AppBar />
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/calendar" element={<Calendar />} />
-        <Route path="/sync" element={<Sync />} />
-      </Routes>
+      <main className="app-main">
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/calendar" element={<Calendar />} />
+          <Route path="/sync" element={<Sync />} />
+        </Routes>
+      </main>
       <Toast />
       <BottomNav />
     </div>

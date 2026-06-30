@@ -9,7 +9,7 @@ const ITEMS = [
 
 export default function BottomNav() {
   return (
-    <div className="bottom-nav">
+    <nav className="bottom-nav" aria-label="Main navigation">
       {ITEMS.map(({ to, label, Icon, end }) => (
         <NavLink
           key={to}
@@ -21,6 +21,6 @@ export default function BottomNav() {
           {label}
         </NavLink>
       ))}
-    </div>
+    </nav>
   )
 }
