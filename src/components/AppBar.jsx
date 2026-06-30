@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useApp } from '../context/AppContext.jsx'
 import { CaretDownIcon, SettingsIcon } from './icons.jsx'
+import CalendarPicker from './CalendarPicker.jsx'
 import DatePickerModal from './DatePickerModal.jsx'
 import SettingsModal from './SettingsModal.jsx'
 
@@ -18,6 +19,7 @@ export default function AppBar() {
   return (
     <div className="app-bar">
       <div className="left">
+        <CalendarPicker />
         <button type="button" className="date-select" onClick={() => setDatePickerOpen(true)}>
           {label}
           <CaretDownIcon />
