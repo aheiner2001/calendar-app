@@ -108,6 +108,13 @@ function saveCloudEvents(uid, events) {
   localStorage.setItem(cloudEventsKey(uid), JSON.stringify(events))
 }
 
+function clearLegacyLocalData(uid) {
+  localStorage.removeItem(STORAGE_KEY)
+  localStorage.removeItem(CALENDARS_KEY)
+  localStorage.removeItem(INVITES_KEY)
+  if (uid) clearCloudData(uid)
+}
+
 function loadLocalInvites() {
   try {
     const raw = localStorage.getItem(INVITES_KEY)
@@ -137,14 +144,7 @@ export {
   ACTIVE_CALENDAR_KEY,
   loadLocalCalendars,
   saveLocalCalendars,
-  loadCloudCalendars,
-  saveCloudCalendars,
-  clearCloudData,
-  loadKnownCalendarIds,
-  addKnownCalendarId,
-  removeKnownCalendarId,
-  loadCloudEvents,
-  saveCloudEvents,
+  clearLegacyLocalData,
   loadLocalInvites,
   saveLocalInvites,
   defaultPersonalCalendar,

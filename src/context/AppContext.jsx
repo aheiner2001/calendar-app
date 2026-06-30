@@ -38,13 +38,9 @@ import { migrate, toFirestoreEvent } from '../lib/events.js'
 import { eventsForDay } from '../lib/repeat.js'
 import {
   ACTIVE_CALENDAR_KEY,
-  clearCloudData,
-  loadCloudCalendars,
-  loadCloudEvents,
+  clearLegacyLocalData,
   loadLocalCalendars,
   loadLocalInvites,
-  saveCloudCalendars,
-  saveCloudEvents,
   saveLocalCalendars,
   saveLocalInvites,
   SETTINGS_KEY,
@@ -93,6 +89,8 @@ export function AppProvider({ children }) {
   const [user, setUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(firebaseEnabled)
   const [syncState, setSyncState] = useState(firebaseEnabled ? 'syncing' : 'local')
+  const [cloudReady, setCloudReady] = useState(!firebaseEnabled)
+  const [syncError, setSyncError] = useState('')
   const [lastSynced, setLastSynced] = useState(null)
   const toastRef = useRef(null)
   const pendingDeletesRef = useRef(new Set())
@@ -162,10 +160,16 @@ export function AppProvider({ children }) {
     return onAuthStateChanged(auth, (u) => {
       setUser(u)
       setAuthLoading(false)
-      if (!u) {
+      if (u) {
+        clearLegacyLocalData(u.uid)
+        setCloudReady(false)
+        setSyncError('')
+      } else {
         setAllEvents([])
         setCalendars([])
+        setCloudReady(!firebaseEnabled)
         setSyncState('offline')
+        setSyncError('')
       }
     })
   }, [])
@@ -183,7 +187,7 @@ export function AppProvider({ children }) {
 
   const signOut = useCallback(async () => {
     const uid = auth.currentUser?.uid
-    if (uid) clearCloudData(uid)
+    if (uid) clearLegacyLocalData(uid)
     await firebaseSignOut(auth)
   }, [])
 
@@ -231,6 +235,7 @@ export function AppProvider({ children }) {
     if (!firebaseEnabled) {
       setCalendars(loadLocalCalendars('local'))
       setAllEvents(loadLocalEvents('local'))
+      setCloudReady(true)
       return
     }
     if (!user) return
@@ -238,20 +243,37 @@ export function AppProvider({ children }) {
     let cancelled = false
     let unsubMember = () => {}
     let unsubOwner = () => {}
+    let unsubEvents = () => {}
+    const unsubsShared = []
 
     const memberQuery = query(
       collection(db, 'calendars'),
       where('members', 'array-contains', user.uid),
     )
     const ownerQuery = query(collection(db, 'calendars'), where('ownerId', '==', user.uid))
+    const ownEventsQuery = query(collection(db, 'events'), where('userId', '==', user.uid))
 
     let memberCals = []
     let ownerCals = []
+    let ownEvents = []
+    const sharedEvents = new Map()
+    let calendarsFromServer = false
+    let eventsFromServer = false
 
     const docToCal = (d) => ({ id: d.id, ...d.data() })
+    const docToEvent = (d) => migrate({ id: d.id, ...d.data() }, user.uid)
+
+    const tryReady = () => {
+      if (cancelled) return
+      if (calendarsFromServer && eventsFromServer) {
+        setCloudReady(true)
+        setSyncState('synced')
+        setLastSynced(new Date())
+      }
+    }
 
     const mergeCalendars = () => {
-      if (cancelled) return
+      if (cancelled || !calendarsFromServer) return
 
       const map = new Map()
       pendingCalendarsRef.current.forEach((cal, id) => map.set(id, cal))
@@ -268,99 +290,12 @@ export function AppProvider({ children }) {
       const pid = personalCalendarId(user.uid)
       if (!map.has(pid)) map.set(pid, defaultPersonalCalendar(user.uid))
 
-      const merged = [...map.values()]
-      setCalendars(merged)
-      saveCloudCalendars(user.uid, merged)
-      setSyncState('synced')
-      setLastSynced(new Date())
-    }
-
-    const boot = async () => {
-      setSyncState('syncing')
-
-      const cached = loadCloudCalendars(user.uid)
-      if (cached?.length) setCalendars(cached)
-
-      try {
-        await user.getIdToken()
-        try {
-          await ensurePersonalCalendar(user)
-        } catch (err) {
-          console.error('Personal calendar setup error:', err)
-        }
-        try {
-          await acceptEmailInvites(user)
-        } catch (err) {
-          console.error('Invite accept error:', err)
-        }
-        if (cancelled) return
-
-        const [memberSnap, ownerSnap] = await Promise.all([
-          getDocsFromServer(memberQuery),
-          getDocsFromServer(ownerQuery),
-        ])
-        memberCals = memberSnap.docs.map(docToCal)
-        ownerCals = ownerSnap.docs.map(docToCal)
-        mergeCalendars()
-
-        unsubMember = onSnapshot(
-          memberQuery,
-          (snapshot) => {
-            if (snapshot.metadata.fromCache && snapshot.empty) return
-            memberCals = snapshot.docs.map(docToCal)
-            mergeCalendars()
-          },
-          (err) => {
-            console.error('Calendars listener error (members):', err)
-            if (!cancelled) setSyncState('error')
-          },
-        )
-
-        unsubOwner = onSnapshot(
-          ownerQuery,
-          (snapshot) => {
-            if (snapshot.metadata.fromCache && snapshot.empty) return
-            ownerCals = snapshot.docs.map(docToCal)
-            mergeCalendars()
-          },
-          (err) => {
-            console.error('Calendars listener error (owner):', err)
-            if (!cancelled) setSyncState('error')
-          },
-        )
-      } catch (err) {
-        console.error('Calendar boot error:', err)
-        if (!cancelled) {
-          mergeCalendars()
-          setSyncState('error')
-        }
-      }
-    }
-
-    boot()
-
-    return () => {
-      cancelled = true
-      unsubMember()
-      unsubOwner()
-    }
-  }, [user, ensurePersonalCalendar, acceptEmailInvites])
-
-  useEffect(() => {
-    if (!firebaseEnabled || !user) return
-
-    let cancelled = false
-    const unsubs = []
-    let ownEvents = []
-    const sharedEvents = new Map()
-
-    const cached = loadCloudEvents(user.uid)
-    if (cached?.length) {
-      setAllEvents(cached.map((e) => migrate(e, user.uid)))
+      setCalendars([...map.values()])
+      tryReady()
     }
 
     const mergeEvents = () => {
-      if (cancelled) return
+      if (cancelled || !eventsFromServer) return
 
       const serverIds = new Set()
       ownEvents.forEach((e) => serverIds.add(e.id))
@@ -386,58 +321,17 @@ export function AppProvider({ children }) {
         if (!map.has(id)) map.set(id, e)
       })
       setAllEvents([...map.values()])
-      setSyncState('synced')
-      setLastSynced(new Date())
+      tryReady()
     }
 
-    const docToEvent = (d) => migrate({ id: d.id, ...d.data() }, user.uid)
+    const subscribeSharedEvents = (sharedCals) => {
+      unsubsShared.forEach((u) => u())
+      unsubsShared.length = 0
+      sharedEvents.clear()
 
-    const ownQuery = query(collection(db, 'events'), where('userId', '==', user.uid))
-
-    const boot = async () => {
-      try {
-        await user.getIdToken()
-        const snap = await getDocs(ownQuery)
-        if (!cancelled) {
-          ownEvents = snap.docs.map(docToEvent)
-          mergeEvents()
-        }
-      } catch (err) {
-        console.error('Events load error:', err)
-        if (!cancelled) setSyncState('error')
-      }
-
-      unsubs.push(
-        onSnapshot(
-          ownQuery,
-          (snapshot) => {
-            if (snapshot.metadata.fromCache && snapshot.empty) return
-            ownEvents = snapshot.docs.map(docToEvent)
-            mergeEvents()
-          },
-          (err) => {
-            console.error('Events listener error:', err)
-            if (!cancelled) setSyncState('error')
-          },
-        ),
-      )
-
-      for (const cal of calendars.filter((c) => c.type === 'shared')) {
+      for (const cal of sharedCals) {
         const sharedQuery = query(collection(db, 'events'), where('calendarId', '==', cal.id))
-        try {
-          const snap = await getDocs(sharedQuery)
-          if (!cancelled) {
-            sharedEvents.set(
-              cal.id,
-              snap.docs.map(docToEvent).filter((e) => e.userId !== user.uid),
-            )
-            mergeEvents()
-          }
-        } catch (err) {
-          console.error(`Events load error (${cal.id}):`, err)
-        }
-
-        unsubs.push(
+        unsubsShared.push(
           onSnapshot(
             sharedQuery,
             (snapshot) => {
@@ -454,25 +348,125 @@ export function AppProvider({ children }) {
       }
     }
 
+    const boot = async () => {
+      setSyncState('syncing')
+      setCloudReady(false)
+      setCalendars([])
+      setAllEvents([])
+
+      try {
+        await user.getIdToken()
+        try {
+          await ensurePersonalCalendar(user)
+        } catch (err) {
+          console.error('Personal calendar setup error:', err)
+        }
+        try {
+          await acceptEmailInvites(user)
+        } catch (err) {
+          console.error('Invite accept error:', err)
+        }
+        if (cancelled) return
+
+        const [memberSnap, ownerSnap, eventSnap] = await Promise.all([
+          getDocsFromServer(memberQuery),
+          getDocsFromServer(ownerQuery),
+          getDocsFromServer(ownEventsQuery),
+        ])
+
+        if (cancelled) return
+
+        memberCals = memberSnap.docs.map(docToCal)
+        ownerCals = ownerSnap.docs.map(docToCal)
+        ownEvents = eventSnap.docs.map(docToEvent)
+        calendarsFromServer = true
+        eventsFromServer = true
+        mergeCalendars()
+        mergeEvents()
+
+        const sharedCals = [...memberCals, ...ownerCals].filter(
+          (c, i, arr) => c.type === 'shared' && arr.findIndex((x) => x.id === c.id) === i,
+        )
+        subscribeSharedEvents(sharedCals)
+
+        unsubMember = onSnapshot(
+          memberQuery,
+          (snapshot) => {
+            if (snapshot.metadata.fromCache && snapshot.empty) return
+            memberCals = snapshot.docs.map(docToCal)
+            mergeCalendars()
+            const shared = [...memberCals, ...ownerCals].filter(
+              (c, i, arr) => c.type === 'shared' && arr.findIndex((x) => x.id === c.id) === i,
+            )
+            subscribeSharedEvents(shared)
+          },
+          (err) => {
+            console.error('Calendars listener error (members):', err)
+            if (!cancelled) {
+              setSyncState('error')
+              setSyncError(err.message || 'Could not sync calendars')
+            }
+          },
+        )
+
+        unsubOwner = onSnapshot(
+          ownerQuery,
+          (snapshot) => {
+            if (snapshot.metadata.fromCache && snapshot.empty) return
+            ownerCals = snapshot.docs.map(docToCal)
+            mergeCalendars()
+          },
+          (err) => {
+            console.error('Calendars listener error (owner):', err)
+            if (!cancelled) {
+              setSyncState('error')
+              setSyncError(err.message || 'Could not sync calendars')
+            }
+          },
+        )
+
+        unsubEvents = onSnapshot(
+          ownEventsQuery,
+          (snapshot) => {
+            if (snapshot.metadata.fromCache && snapshot.empty) return
+            ownEvents = snapshot.docs.map(docToEvent)
+            mergeEvents()
+          },
+          (err) => {
+            console.error('Events listener error:', err)
+            if (!cancelled) {
+              setSyncState('error')
+              setSyncError(err.message || 'Could not sync events')
+            }
+          },
+        )
+      } catch (err) {
+        console.error('Cloud sync error:', err)
+        if (!cancelled) {
+          setSyncState('error')
+          setSyncError(err.message || 'Could not load data from the cloud')
+          setCloudReady(true)
+        }
+      }
+    }
+
     boot()
 
     return () => {
       cancelled = true
-      unsubs.forEach((u) => u())
+      unsubMember()
+      unsubOwner()
+      unsubEvents()
+      unsubsShared.forEach((u) => u())
     }
-  }, [user, calendars])
+  }, [user, ensurePersonalCalendar, acceptEmailInvites])
 
   useEffect(() => {
     if (!firebaseEnabled) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(allEvents))
       saveLocalCalendars(calendars)
-      return
     }
-    if (user) {
-      if (calendars.length) saveCloudCalendars(user.uid, calendars)
-      if (allEvents.length) saveCloudEvents(user.uid, allEvents)
-    }
-  }, [allEvents, calendars, user])
+  }, [allEvents, calendars])
 
   const showToast = useCallback((msg) => {
     setToast(msg)
@@ -879,6 +873,8 @@ export function AppProvider({ children }) {
       signOut,
       syncState,
       lastSynced,
+      cloudReady,
+      syncError,
       firebaseEnabled,
       toast,
       showToast,
@@ -915,6 +911,8 @@ export function AppProvider({ children }) {
       signOut,
       syncState,
       lastSynced,
+      cloudReady,
+      syncError,
       toast,
       showToast,
     ],

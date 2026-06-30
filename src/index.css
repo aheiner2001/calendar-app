@@ -1125,6 +1125,14 @@ body.light .theme-toggle .knob{ left:19px; }
   background:var(--bg);
 }
 .auth-loading{ color:var(--text-dim); font-size:15px; }
+.sync-error-banner{
+  background:#e0457f;
+  color:#fff;
+  padding:10px 16px;
+  font-size:13px;
+  text-align:center;
+  flex-shrink:0;
+}
 .auth-card{
   width:100%;
   max-width:400px;

@@ -9,7 +9,7 @@ import Calendar from './pages/Calendar.jsx'
 import Sync from './pages/Sync.jsx'
 
 export default function App() {
-  const { firebaseEnabled, authLoading, user } = useApp()
+  const { firebaseEnabled, authLoading, user, cloudReady, syncError } = useApp()
 
   if (firebaseEnabled && authLoading) {
     return <div className="auth-screen"><p className="auth-loading">Loading…</p></div>
@@ -19,8 +19,21 @@ export default function App() {
     return <AuthScreen />
   }
 
+  if (firebaseEnabled && user && !cloudReady) {
+    return (
+      <div className="auth-screen">
+        <p className="auth-loading">Syncing from your account…</p>
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell">
+      {syncError && (
+        <div className="sync-error-banner" role="alert">
+          Cloud sync error: {syncError}
+        </div>
+      )}
       <AppBar />
       <main className="app-main">
         <Routes>
