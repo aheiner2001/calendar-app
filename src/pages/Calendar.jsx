@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import AddEventModal from '../components/AddEventModal.jsx'
 import EventDetailModal from '../components/EventDetailModal.jsx'
@@ -49,6 +49,15 @@ export default function Calendar() {
     const row = gridRef.current?.querySelector('.time-row')
     if (row) setRowH(row.getBoundingClientRect().height)
   }, [])
+
+  useEffect(() => {
+    if (moveId || resizeId) {
+      document.body.classList.add('calendar-dragging')
+    } else {
+      document.body.classList.remove('calendar-dragging')
+    }
+    return () => document.body.classList.remove('calendar-dragging')
+  }, [moveId, resizeId])
 
   const dayEvents = useMemo(
     () => layoutEvents(eventsForDay(events, selectedDate)),
@@ -176,6 +185,7 @@ export default function Calendar() {
         return
       }
 
+      me.preventDefault()
       session.moved = true
       const next = shiftEvent(session.origStart, session.origEnd, me.clientY - session.startY)
       setDraft({ id: ev.id, ...next })
@@ -220,7 +230,7 @@ export default function Calendar() {
       showToast('Drag to move')
     }, LONG_PRESS_MS)
 
-    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointermove', onMove, { passive: false })
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
   }
@@ -230,8 +240,10 @@ export default function Calendar() {
     e.preventDefault()
     let cur = { start: ev.start, end: ev.end }
     setDraft({ id: ev.id, ...cur })
+    document.body.classList.add('calendar-dragging')
 
     const move = (me) => {
+      me.preventDefault()
       const m = yToMinutes(me.clientY, snap)
       if (which === 'top') {
         cur = { start: Math.min(m, cur.end - MIN_DURATION), end: cur.end }
@@ -241,6 +253,7 @@ export default function Calendar() {
       setDraft({ id: ev.id, ...cur })
     }
     const up = () => {
+      document.body.classList.remove('calendar-dragging')
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       const snapped = {
@@ -252,7 +265,7 @@ export default function Calendar() {
       setDraft(null)
       showToast(formatRange(snapped.start, snapped.end))
     }
-    window.addEventListener('pointermove', move)
+    window.addEventListener('pointermove', move, { passive: false })
     window.addEventListener('pointerup', up)
   }
 
