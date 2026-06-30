@@ -841,6 +841,27 @@ body.light .theme-toggle .knob{ left:19px; }
   margin-bottom:8px;
 }
 .sync-full-btn{ width:100%; margin-bottom:12px; }
+.share-sync-hint{ margin-bottom:12px; }
+.share-sync-row{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+  margin-bottom:16px;
+}
+.share-sync-btn{ flex-shrink:0; }
+.share-sync-meta{ font-size:12px; color:var(--text-dim); }
+.share-sync-error{
+  background:rgba(224,69,127,0.12);
+  border:1px solid #e0457f;
+  border-radius:10px;
+  padding:12px;
+  font-size:13px;
+  line-height:1.45;
+  margin-bottom:16px;
+  color:var(--text);
+}
+.share-sync-error code{ font-size:12px; }
 .sync-invite-card{
   background:var(--bg-card);
   border:1px solid var(--line);

@@ -18,6 +18,10 @@ export default function Sync() {
     joinByInviteCode,
     ensureCalendarShareCode,
     signInWithGoogle,
+    syncFromCloud,
+    syncState,
+    lastSynced,
+    syncError,
   } = useApp()
 
   const [searchParams, setSearchParams] = useSearchParams()
@@ -125,6 +129,21 @@ export default function Sync() {
     }
   }
 
+  const handleSyncFromCloud = async () => {
+    setBusy(true)
+    try {
+      const { importedCalendars, importedEvents } = await syncFromCloud()
+      const parts = []
+      if (importedCalendars > 0) parts.push(`${importedCalendars} calendar(s)`)
+      if (importedEvents > 0) parts.push(`${importedEvents} event(s)`)
+      showToast(parts.length ? `Imported ${parts.join(' and ')}` : 'Already up to date')
+    } catch (err) {
+      showToast(err.message || 'Sync failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const initials = user?.email?.[0]?.toUpperCase() ?? '?'
 
   return (
@@ -165,6 +184,37 @@ export default function Sync() {
             Signed in as {user.email}. Calendars and events sync through your Google account — use the
             same sign-in on every device.
           </p>
+        )}
+
+        {firebaseEnabled && user && (
+          <div className="share-sync-row">
+            <button
+              type="button"
+              className="btn btn-primary share-sync-btn"
+              onClick={handleSyncFromCloud}
+              disabled={busy || syncState === 'syncing'}
+            >
+              {syncState === 'syncing' ? 'Syncing…' : 'Sync from cloud'}
+            </button>
+            {lastSynced && (
+              <span className="share-sync-meta">
+                Last synced {lastSynced.toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+        )}
+
+        {syncError && (
+          <div className="share-sync-error" role="alert">
+            {syncError}
+            {syncError.includes('permission') && (
+              <span>
+                {' '}
+                Try Firebase Console → App Check → set Firestore to Monitor (not Enforce), then run{' '}
+                <code>firebase deploy --only firestore:rules</code>.
+              </span>
+            )}
+          </div>
         )}
 
         {(firebaseEnabled && user) || !firebaseEnabled ? (

@@ -6,6 +6,14 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function personalCalId() {
+      return 'personal-' + request.auth.uid;
+    }
+
+    function isPersonalCal(calendarId) {
+      return isSignedIn() && calendarId == personalCalId();
+    }
+
     function calendarDoc(calendarId) {
       return get(/databases/$(database)/documents/calendars/$(calendarId));
     }
@@ -35,9 +43,9 @@ service cloud.firestore {
     }
 
     match /calendars/{calendarId} {
-      // Members/owners see their calendars; any signed-in user can read shared calendars (for join by code).
       allow read: if isSignedIn() && (
-        resource.data.ownerId == request.auth.uid
+        isPersonalCal(calendarId)
+        || resource.data.ownerId == request.auth.uid
         || (
           resource.data.members is list
           && resource.data.members.hasAny([request.auth.uid])
@@ -51,7 +59,8 @@ service cloud.firestore {
         && request.resource.data.members.hasAny([request.auth.uid]);
 
       allow update: if isSignedIn() && (
-        resource.data.ownerId == request.auth.uid
+        isPersonalCal(calendarId)
+        || resource.data.ownerId == request.auth.uid
         || (
           resource.data.members is list
           && resource.data.members.hasAny([request.auth.uid])
@@ -80,11 +89,17 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.keys().hasAll(['title', 'day', 'start', 'end', 'color', 'calendarId'])
-        && isCalendarMember(request.resource.data.calendarId);
+        && (
+          isCalendarMember(request.resource.data.calendarId)
+          || request.resource.data.calendarId == personalCalId()
+        );
 
       allow update: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
-        && isCalendarMember(request.resource.data.calendarId);
+        && (
+          isCalendarMember(request.resource.data.calendarId)
+          || request.resource.data.calendarId == personalCalId()
+        );
 
       allow delete: if isSignedIn() && (
         resource.data.userId == request.auth.uid

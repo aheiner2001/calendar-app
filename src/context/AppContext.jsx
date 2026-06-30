@@ -205,11 +205,97 @@ export function AppProvider({ children }) {
       })
       return
     }
-    const members = snap.data().members
-    if (!Array.isArray(members) || !members.includes(u.uid)) {
-      await setDoc(ref, { members: arrayUnion(u.uid) }, { merge: true })
+    const data = snap.data()
+    const members = Array.isArray(data.members) ? [...data.members] : []
+    if (!members.includes(u.uid)) {
+      members.push(u.uid)
+      await updateDoc(ref, { members, ownerId: u.uid, type: data.type || 'personal' })
     }
   }, [])
+
+  const syncFromCloud = useCallback(async () => {
+    if (!firebaseEnabled || !user) {
+      throw new Error('Sign in with Google to sync from the cloud')
+    }
+
+    setSyncState('syncing')
+    const errors = []
+
+    await user.getIdToken()
+
+    try {
+      await ensurePersonalCalendar(user)
+    } catch (err) {
+      errors.push(`Personal: ${err.message || err.code}`)
+    }
+
+    try {
+      await acceptEmailInvites(user)
+    } catch (err) {
+      console.error('Invite accept error:', err)
+    }
+
+    let importedCalendars = 0
+    let importedEvents = 0
+
+    try {
+      const memberQuery = query(
+        collection(db, 'calendars'),
+        where('members', 'array-contains', user.uid),
+      )
+      const ownerQuery = query(collection(db, 'calendars'), where('ownerId', '==', user.uid))
+      const [memberSnap, ownerSnap] = await Promise.all([
+        getDocsFromServer(memberQuery),
+        getDocsFromServer(ownerQuery),
+      ])
+
+      const serverCals = new Map()
+      memberSnap.docs.forEach((d) => serverCals.set(d.id, { id: d.id, ...d.data() }))
+      ownerSnap.docs.forEach((d) => serverCals.set(d.id, { id: d.id, ...d.data() }))
+
+      setCalendars((prev) => {
+        const map = new Map(prev.map((c) => [c.id, c]))
+        const before = map.size
+        serverCals.forEach((cal, id) => map.set(id, cal))
+        const pid = personalCalendarId(user.uid)
+        if (!map.has(pid)) map.set(pid, defaultPersonalCalendar(user.uid))
+        importedCalendars = Math.max(0, map.size - before)
+        return [...map.values()]
+      })
+    } catch (err) {
+      errors.push(`Calendars: ${err.message || err.code}`)
+    }
+
+    try {
+      const ownEventsQuery = query(collection(db, 'events'), where('userId', '==', user.uid))
+      const eventSnap = await getDocsFromServer(ownEventsQuery)
+      const serverEvents = eventSnap.docs.map((d) =>
+        migrate({ id: d.id, ...d.data() }, user.uid),
+      )
+
+      setAllEvents((prev) => {
+        const map = new Map(prev.map((e) => [e.id, e]))
+        const before = map.size
+        serverEvents.forEach((e) => map.set(e.id, e))
+        importedEvents = Math.max(0, map.size - before)
+        return [...map.values()]
+      })
+    } catch (err) {
+      errors.push(`Events: ${err.message || err.code}`)
+    }
+
+    if (errors.length) {
+      const msg = errors.join(' · ')
+      setSyncState('error')
+      setSyncError(msg)
+      throw new Error(msg)
+    }
+
+    setSyncState('synced')
+    setSyncError('')
+    setLastSynced(new Date())
+    return { importedCalendars, importedEvents }
+  }, [user, ensurePersonalCalendar, acceptEmailInvites])
 
   const acceptEmailInvites = useCallback(async (u) => {
     if (!u.email) return
@@ -368,21 +454,37 @@ export function AppProvider({ children }) {
         }
         if (cancelled) return
 
-        const [memberSnap, ownerSnap, eventSnap] = await Promise.all([
-          getDocsFromServer(memberQuery),
-          getDocsFromServer(ownerQuery),
-          getDocsFromServer(ownEventsQuery),
-        ])
+        try {
+          const [memberSnap, ownerSnap] = await Promise.all([
+            getDocsFromServer(memberQuery),
+            getDocsFromServer(ownerQuery),
+          ])
+          memberCals = memberSnap.docs.map(docToCal)
+          ownerCals = ownerSnap.docs.map(docToCal)
+          calendarsFromServer = true
+          mergeCalendars()
+        } catch (err) {
+          console.error('Calendar load error:', err)
+          calendarsFromServer = true
+          mergeCalendars()
+          setSyncState('error')
+          setSyncError((prev) => prev || `Calendars: ${err.message || err.code}`)
+        }
+
+        try {
+          const eventSnap = await getDocsFromServer(ownEventsQuery)
+          ownEvents = eventSnap.docs.map(docToEvent)
+          eventsFromServer = true
+          mergeEvents()
+        } catch (err) {
+          console.error('Events load error:', err)
+          eventsFromServer = true
+          mergeEvents()
+          setSyncState('error')
+          setSyncError((prev) => prev || `Events: ${err.message || err.code}`)
+        }
 
         if (cancelled) return
-
-        memberCals = memberSnap.docs.map(docToCal)
-        ownerCals = ownerSnap.docs.map(docToCal)
-        ownEvents = eventSnap.docs.map(docToEvent)
-        calendarsFromServer = true
-        eventsFromServer = true
-        mergeCalendars()
-        mergeEvents()
 
         const sharedCals = [...memberCals, ...ownerCals].filter(
           (c, i, arr) => c.type === 'shared' && arr.findIndex((x) => x.id === c.id) === i,
@@ -445,8 +547,9 @@ export function AppProvider({ children }) {
         if (!cancelled) {
           setSyncState('error')
           setSyncError(err.message || 'Could not load data from the cloud')
-          setCloudReady(true)
         }
+      } finally {
+        if (!cancelled) setCloudReady(true)
       }
     }
 
@@ -871,6 +974,7 @@ export function AppProvider({ children }) {
       signInWithGoogle,
       signInWithApple,
       signOut,
+      syncFromCloud,
       syncState,
       lastSynced,
       cloudReady,
@@ -909,6 +1013,7 @@ export function AppProvider({ children }) {
       signInWithGoogle,
       signInWithApple,
       signOut,
+      syncFromCloud,
       syncState,
       lastSynced,
       cloudReady,
