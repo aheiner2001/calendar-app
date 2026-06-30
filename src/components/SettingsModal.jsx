@@ -6,10 +6,10 @@ export default function SettingsModal({ onClose }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Saved colors</h3>
+        <h3>Quick add presets</h3>
         <p className="settings-hint">
-          These are your quick-add activities. Tap the swatch to recolor, rename the label, or
-          remove ones you don't use. They appear in the New event screen.
+          Saved activities for one-tap event creation. Each preset sets a title and color in the
+          New event screen. Edit labels and colors here, or remove ones you don't use.
         </p>
 
         {settings.savedColors.map((c) => (
@@ -33,7 +33,7 @@ export default function SettingsModal({ onClose }) {
         ))}
 
         <button className="add-color-btn" onClick={addColor}>
-          + Add color
+          + Add preset
         </button>
 
         <div className="modal-actions">

@@ -21,6 +21,11 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
 
   const snapTime = (value) => minutesToTimeString(snapMinutes(timeStringToMinutes(value)))
 
+  const applyPreset = (preset) => {
+    setTitle(preset.label)
+    setColor(preset.color)
+  }
+
   const handleSave = async () => {
     const startMin = snapMinutes(timeStringToMinutes(start))
     let endMin = snapMinutes(timeStringToMinutes(end))
@@ -55,6 +60,25 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>{isEdit ? 'Edit event' : 'New event'}</h3>
+
+        {!isEdit && colors.length > 0 && (
+          <>
+            <label>Quick add</label>
+            <div className="preset-row">
+              {colors.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={`preset-chip${color === preset.color && title === preset.label ? ' selected' : ''}`}
+                  onClick={() => applyPreset(preset)}
+                >
+                  <span className="swatch" style={{ background: preset.color }} />
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         <label>Title</label>
         <input

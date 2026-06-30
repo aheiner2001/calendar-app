@@ -384,6 +384,7 @@ export default function Calendar() {
         />
       ) : (
       <div className={`grid-wrap${moveId || resizeId ? ' calendar-dragging' : ''}`} ref={gridRef}>
+        <div className="grid-inner">
         {hours.map((h) => (
           <div className="time-row" key={h}>
             <div className="time-label">{minutesToLabel(h * 60).replace(':00', '')}</div>
@@ -437,6 +438,7 @@ export default function Calendar() {
               </div>
             )
           })}
+        </div>
         </div>
       </div>
       )}

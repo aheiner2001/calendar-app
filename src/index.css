@@ -341,6 +341,11 @@ body.light .theme-toggle .knob{ left:19px; }
 .grid-wrap::-webkit-scrollbar{ width:8px; }
 .grid-wrap::-webkit-scrollbar-thumb{ background:var(--line); border-radius:4px; }
 
+.grid-inner{
+  position:relative;
+  min-height:100%;
+}
+
 .time-row{
   display:flex;
   border-top:1px solid var(--line);
