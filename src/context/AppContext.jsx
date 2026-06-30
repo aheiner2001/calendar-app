@@ -90,6 +90,7 @@ export function AppProvider({ children }) {
   const toastRef = useRef(null)
   const pendingDeletesRef = useRef(new Set())
   const pendingAddsRef = useRef(new Map())
+  const pendingCalendarsRef = useRef(new Map())
   const [toast, setToast] = useState('')
 
   const uid = user?.uid ?? 'local'
@@ -249,24 +250,42 @@ export function AppProvider({ children }) {
     if (!user) return
 
     let cancelled = false
-    let unsubCals = () => {}
+    let unsubMember = () => {}
+    let unsubOwner = () => {}
 
-    const calendarsQuery = query(
+    const memberQuery = query(
       collection(db, 'calendars'),
       where('members', 'array-contains', user.uid),
     )
+    const ownerQuery = query(collection(db, 'calendars'), where('ownerId', '==', user.uid))
 
-    const applyCalendars = (snapshot) => {
+    let memberCals = []
+    let ownerCals = []
+
+    const docToCal = (d) => ({ id: d.id, ...d.data() })
+
+    const mergeCalendars = () => {
       if (cancelled) return
-      const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
-      setCalendars(loaded.length > 0 ? loaded : [defaultPersonalCalendar(user.uid)])
+      const serverIds = new Set([...memberCals, ...ownerCals].map((c) => c.id))
+      for (const id of pendingCalendarsRef.current.keys()) {
+        if (serverIds.has(id)) pendingCalendarsRef.current.delete(id)
+      }
+
+      const map = new Map()
+      pendingCalendarsRef.current.forEach((cal, id) => map.set(id, cal))
+      memberCals.forEach((cal) => map.set(cal.id, cal))
+      ownerCals.forEach((cal) => map.set(cal.id, cal))
+
+      const pid = personalCalendarId(user.uid)
+      if (!map.has(pid)) map.set(pid, defaultPersonalCalendar(user.uid))
+
+      setCalendars([...map.values()])
       setSyncState('synced')
       setLastSynced(new Date())
     }
 
     const boot = async () => {
       setSyncState('syncing')
-      setCalendars([defaultPersonalCalendar(user.uid)])
       try {
         try {
           await ensurePersonalCalendar(user)
@@ -280,21 +299,38 @@ export function AppProvider({ children }) {
         }
         if (cancelled) return
 
-        const snap = await getDocs(calendarsQuery)
-        applyCalendars(snap)
+        const [memberSnap, ownerSnap] = await Promise.all([getDocs(memberQuery), getDocs(ownerQuery)])
+        memberCals = memberSnap.docs.map(docToCal)
+        ownerCals = ownerSnap.docs.map(docToCal)
+        mergeCalendars()
 
-        unsubCals = onSnapshot(
-          calendarsQuery,
-          applyCalendars,
+        unsubMember = onSnapshot(
+          memberQuery,
+          (snapshot) => {
+            memberCals = snapshot.docs.map(docToCal)
+            mergeCalendars()
+          },
           (err) => {
-            console.error('Calendars listener error:', err)
+            console.error('Calendars listener error (members):', err)
+            if (!cancelled) setSyncState('error')
+          },
+        )
+
+        unsubOwner = onSnapshot(
+          ownerQuery,
+          (snapshot) => {
+            ownerCals = snapshot.docs.map(docToCal)
+            mergeCalendars()
+          },
+          (err) => {
+            console.error('Calendars listener error (owner):', err)
             if (!cancelled) setSyncState('error')
           },
         )
       } catch (err) {
         console.error('Calendar boot error:', err)
         if (!cancelled) {
-          setCalendars([defaultPersonalCalendar(user.uid)])
+          mergeCalendars()
           setSyncState('error')
         }
       }
@@ -304,7 +340,8 @@ export function AppProvider({ children }) {
 
     return () => {
       cancelled = true
-      unsubCals()
+      unsubMember()
+      unsubOwner()
     }
   }, [user, ensurePersonalCalendar, acceptEmailInvites])
 
@@ -578,6 +615,7 @@ export function AppProvider({ children }) {
         expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
       })
       const newCal = { id, ...cal }
+      pendingCalendarsRef.current.set(id, newCal)
       setCalendars((prev) => (prev.some((c) => c.id === id) ? prev : [...prev, newCal]))
       return newCal
     },
@@ -702,6 +740,7 @@ export function AppProvider({ children }) {
         ...calData,
         members: members.includes(user.uid) ? members : [...members, user.uid],
       }
+      pendingCalendarsRef.current.set(joinedCal.id, joinedCal)
       setCalendars((prev) => {
         if (prev.some((c) => c.id === joinedCal.id)) {
           return prev.map((c) => (c.id === joinedCal.id ? joinedCal : c))
@@ -739,6 +778,7 @@ export function AppProvider({ children }) {
 
       if (!isOwner) {
         await setDoc(doc(db, 'calendars', calendarId), { members: arrayRemove(user.uid) }, { merge: true })
+        pendingCalendarsRef.current.delete(calendarId)
         setCalendars((prev) => prev.filter((c) => c.id !== calendarId))
         clearActive()
         return
@@ -756,6 +796,7 @@ export function AppProvider({ children }) {
       ])
 
       setCalendars((prev) => prev.filter((c) => c.id !== calendarId))
+      pendingCalendarsRef.current.delete(calendarId)
       setAllEvents((prev) => prev.filter((e) => e.calendarId !== calendarId))
       clearActive()
     },

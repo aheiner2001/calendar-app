@@ -151,6 +151,45 @@ body.calendar-dragging{
 }
 body.light .theme-toggle .knob{ left:19px; }
 
+@media (max-width: 540px) {
+  .app-bar{
+    grid-template-columns:1fr auto;
+    grid-template-rows:auto auto;
+    gap:8px 10px;
+    padding:calc(10px + var(--safe-top)) 12px 10px;
+  }
+  .app-bar-left{
+    grid-column:1;
+    grid-row:1;
+  }
+  .app-bar-right{
+    grid-column:2;
+    grid-row:1;
+    gap:10px;
+  }
+  .app-bar-center{
+    grid-column:1 / -1;
+    grid-row:2;
+    justify-self:stretch;
+    width:100%;
+  }
+  .app-bar-center .calendar-picker{
+    width:100%;
+  }
+  .app-bar-center .calendar-picker-btn{
+    width:100%;
+    max-width:none;
+    justify-content:center;
+  }
+  .date-select{
+    font-size:18px;
+  }
+  .view-toggle-btn{
+    padding:5px 10px;
+    font-size:12px;
+  }
+}
+
 .calendar-toolbar{
   display:flex;
   justify-content:flex-end;

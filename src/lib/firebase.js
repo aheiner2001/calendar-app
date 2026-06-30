@@ -15,7 +15,7 @@ const config = {
 
 export const firebaseEnabled = Boolean(config.apiKey && config.projectId)
 
-const geminiModelName = import.meta.env.VITE_GEMINI_MODEL || 'gemini-2.5-flash'
+const geminiModelName = import.meta.env.VITE_GEMINI_MODEL || 'gemini-2.5-flash-lite'
 const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY
 
 let app = null
@@ -57,4 +57,5 @@ if (firebaseEnabled) {
 
 export const appCheckEnabled = Boolean(recaptchaSiteKey)
 export const aiEnabled = Boolean(geminiModel)
+export const geminiModelNameUsed = geminiModelName
 export { db, auth, app, geminiModel }
