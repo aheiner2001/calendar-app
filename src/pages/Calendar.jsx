@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import AddEventModal from '../components/AddEventModal.jsx'
-import { PlusIcon, RepeatIcon } from '../components/icons.jsx'
+import { EditIcon, PlusIcon, RepeatIcon } from '../components/icons.jsx'
 import { layoutEvents } from '../lib/layout.js'
 import { colorFill } from '../lib/settings.js'
 import {
@@ -170,10 +170,7 @@ export default function Calendar() {
       if (me.pointerId !== session.pointerId) return
       cleanup()
 
-      if (!session.longPressed) {
-        if (!session.cancelled) openEdit(ev)
-        return
-      }
+      if (!session.longPressed) return
 
       if (session.moved) {
         const next = shiftEvent(session.origStart, session.origEnd, me.clientY - session.startY)
@@ -289,12 +286,30 @@ export default function Calendar() {
                     onPointerDown={(e) => startHandleDrag(e, ev, 'top')}
                   />
                 )}
-                <div className="title">
-                  {ev.title}
-                  {ev.repeat && <RepeatIcon className="repeat-icon" />}
-                </div>
-                {(height > 30 || isResizing || isMoving) && (
-                  <div className="time">{formatRange(live.start, live.end)}</div>
+                <button
+                  type="button"
+                  className="event-edit-btn"
+                  aria-label="Edit event"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    openEdit(ev)
+                  }}
+                >
+                  <EditIcon />
+                </button>
+                {ev.notes?.trim() ? (
+                  <div className="notes">{ev.notes.trim()}</div>
+                ) : (
+                  <>
+                    <div className="title">
+                      {ev.title}
+                      {ev.repeat && <RepeatIcon className="repeat-icon" />}
+                    </div>
+                    {(height > 30 || isResizing || isMoving) && (
+                      <div className="time">{formatRange(live.start, live.end)}</div>
+                    )}
+                  </>
                 )}
                 {isResizing && (
                   <div

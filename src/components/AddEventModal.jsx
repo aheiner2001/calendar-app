@@ -16,6 +16,7 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
   const [start, setStart] = useState(minutesToTimeString(snapMinutes(defaultStart)))
   const [end, setEnd] = useState(minutesToTimeString(snapMinutes(defaultEnd)))
   const [repeat, setRepeat] = useState(editing?.repeat ?? false)
+  const [notes, setNotes] = useState(editing?.notes ?? '')
 
   const applyPreset = (preset) => {
     if (!title || colors.some((c) => c.label === title)) setTitle(preset.label)
@@ -36,6 +37,7 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
       end: endMin,
       color,
       repeat,
+      notes: notes.trim(),
     }
     if (isEdit) {
       await updateEvent(record)
@@ -119,6 +121,14 @@ export default function AddEventModal({ dayKey, editing, initialStart, initialEn
             />
           </div>
         </div>
+
+        <label>Notes</label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="What to remember for this block…"
+          rows={3}
+        />
 
         <label className="checkbox-row">
           <input type="checkbox" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} />
