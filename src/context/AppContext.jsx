@@ -753,16 +753,38 @@ export function AppProvider({ children }) {
         throw new Error('This invite was sent to a different email')
       }
       const calRef = doc(db, 'calendars', inv.calendarId)
-      const calSnap = await getDoc(calRef)
-      if (!calSnap.exists()) throw new Error('Calendar no longer exists')
-      const calData = calSnap.data()
-      const members = calData.members || []
-      if (!members.includes(user.uid)) {
+
+      try {
         await setDoc(calRef, { members: arrayUnion(user.uid) }, { merge: true })
+      } catch (err) {
+        const msg = String(err?.message || err?.code || '')
+        if (msg.includes('permission') || err?.code === 'permission-denied') {
+          throw new Error('Could not join calendar — permission denied. Ask the owner to redeploy the latest app rules.')
+        }
+        throw err
       }
+
+      let calData
+      try {
+        const calSnap = await getDoc(calRef)
+        calData = calSnap.exists()
+          ? calSnap.data()
+          : { name: inv.calendarName, ownerId: inv.createdBy, type: 'shared', members: [user.uid] }
+      } catch {
+        calData = {
+          name: inv.calendarName,
+          ownerId: inv.createdBy,
+          type: 'shared',
+          members: [inv.createdBy, user.uid],
+        }
+      }
+
+      const members = Array.isArray(calData.members) ? calData.members : []
       const joinedCal = {
         id: inv.calendarId,
         ...calData,
+        name: calData.name || inv.calendarName,
+        type: calData.type || 'shared',
         members: members.includes(user.uid) ? members : [...members, user.uid],
       }
       pendingCalendarsRef.current.set(joinedCal.id, joinedCal)
