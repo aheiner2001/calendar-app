@@ -25,6 +25,7 @@ import {
 } from '../lib/time.js'
 
 const MIN_DURATION = 15
+const CREATE_MIN_DURATION = 30
 const LONG_PRESS_MS = 380
 const LONG_PRESS_TOUCH_MS = 480
 
@@ -34,6 +35,7 @@ export default function Calendar() {
   const [viewing, setViewing] = useState(null)
   const [editing, setEditing] = useState(null)
   const [newSlot, setNewSlot] = useState(null) // { start, end } when adding from grid tap
+  const [createDraft, setCreateDraft] = useState(null) // { start, end } while drag-to-create
   const [resizeId, setResizeId] = useState(null)
   const [moveId, setMoveId] = useState(null)
   const [draft, setDraft] = useState(null) // {id, start, end} live values while dragging
@@ -62,13 +64,13 @@ export default function Calendar() {
   }, [calendarView])
 
   useEffect(() => {
-    if (moveId || resizeId) {
+    if (moveId || resizeId || createDraft) {
       document.body.classList.add('calendar-dragging')
     } else {
       document.body.classList.remove('calendar-dragging')
     }
     return () => document.body.classList.remove('calendar-dragging')
-  }, [moveId, resizeId])
+  }, [moveId, resizeId, createDraft])
 
   const dayEvents = useMemo(
     () => layoutEvents(eventsForDay(events, selectedDate)),
@@ -148,6 +150,7 @@ export default function Calendar() {
     setMoveId(null)
     setViewing(null)
     setEditing(null)
+    setCreateDraft(null)
     setNewSlot(slot ?? null)
     setModalOpen(true)
   }
@@ -170,12 +173,120 @@ export default function Calendar() {
     setModalOpen(true)
   }
 
-  const handleGridClick = (e) => {
-    if (resizeId) {
-      setResizeId(null)
-      return
+  const defaultCreateDuration = Math.max(
+    CREATE_MIN_DURATION,
+    settings.defaultDurationMinutes || 60,
+  )
+
+  const buildCreateRange = (anchorStart, clientY, moved) => {
+    const maxEnd = GRID_END_HOUR * 60
+    if (!moved) {
+      return { start: anchorStart, end: Math.min(anchorStart + defaultCreateDuration, maxEnd) }
     }
-    openNew(yToHourSlot(e.clientY))
+    let end = snapMinutes(yToMinutesRaw(clientY), snap)
+    if (end <= anchorStart) end = anchorStart + CREATE_MIN_DURATION
+    if (end - anchorStart < CREATE_MIN_DURATION) end = anchorStart + CREATE_MIN_DURATION
+    return { start: anchorStart, end: Math.min(end, maxEnd) }
+  }
+
+  const onGridPointerDown = (e) => {
+    if (e.button !== 0 || resizeId || moveId || createDraft) return
+
+    const gridEl = gridRef.current
+    const startY = e.clientY
+    const anchorStart = snapMinutes(yToMinutesRaw(startY), snap)
+    const pressMs = e.pointerType === 'touch' ? LONG_PRESS_TOUCH_MS : LONG_PRESS_MS
+
+    const session = {
+      pointerId: e.pointerId,
+      anchorStart,
+      longPressed: false,
+      moved: false,
+      cancelled: false,
+      createActive: false,
+      unlockScroll: null,
+    }
+
+    const cleanupCreateListeners = () => {
+      window.removeEventListener('pointermove', onCreateMove)
+      window.removeEventListener('pointerup', onCreateUp)
+      window.removeEventListener('pointercancel', onCreateCancel)
+      session.unlockScroll?.()
+      session.unlockScroll = null
+      gridEl?.classList.remove('calendar-dragging')
+    }
+
+    const cleanupWaitListeners = () => {
+      clearTimeout(session.timer)
+      window.removeEventListener('pointermove', onWaitMove)
+      window.removeEventListener('pointerup', onWaitUp)
+      window.removeEventListener('pointercancel', onWaitCancel)
+    }
+
+    const onWaitMove = (me) => {
+      if (me.pointerId !== session.pointerId) return
+      const dy = Math.abs(me.clientY - startY)
+      const dx = Math.abs(me.clientX - e.clientX)
+      if (dy > 18 && dy > dx) {
+        session.cancelled = true
+        cleanupWaitListeners()
+      }
+    }
+
+    const onCreateMove = (me) => {
+      if (me.pointerId !== session.pointerId) return
+      me.preventDefault()
+      session.moved = true
+      setCreateDraft(buildCreateRange(session.anchorStart, me.clientY, true))
+    }
+
+    const onCreateUp = (me) => {
+      if (me.pointerId !== session.pointerId) return
+      cleanupCreateListeners()
+      const range = buildCreateRange(session.anchorStart, me.clientY, session.moved)
+      setCreateDraft(null)
+      openNew(range)
+    }
+
+    const onCreateCancel = (me) => {
+      if (me.pointerId !== session.pointerId) return
+      cleanupCreateListeners()
+      setCreateDraft(null)
+    }
+
+    const onWaitUp = (me) => {
+      if (me.pointerId !== session.pointerId) return
+      cleanupWaitListeners()
+      if (!session.longPressed && !session.cancelled) {
+        openNew(yToHourSlot(startY))
+      }
+    }
+
+    const onWaitCancel = (me) => {
+      if (me.pointerId !== session.pointerId) return
+      session.cancelled = true
+      cleanupWaitListeners()
+    }
+
+    const activateCreate = () => {
+      cleanupWaitListeners()
+      session.longPressed = true
+      session.createActive = true
+      gridEl?.classList.add('calendar-dragging')
+      session.unlockScroll = lockScrollWhileDragging(gridEl)
+      setCreateDraft(buildCreateRange(session.anchorStart, startY, false))
+      if (navigator.vibrate) navigator.vibrate(12)
+      showToast('Drag to set length')
+
+      window.addEventListener('pointermove', onCreateMove, { passive: false })
+      window.addEventListener('pointerup', onCreateUp)
+      window.addEventListener('pointercancel', onCreateCancel)
+    }
+
+    session.timer = setTimeout(activateCreate, pressMs)
+    window.addEventListener('pointermove', onWaitMove, { passive: true })
+    window.addEventListener('pointerup', onWaitUp)
+    window.addEventListener('pointercancel', onWaitCancel)
   }
 
   // Short tap -> detail. Hold -> drag or resize handles on release.
@@ -417,7 +528,7 @@ export default function Calendar() {
           onEventClick={openDetail}
         />
       ) : (
-      <div className={`grid-wrap${moveId || resizeId ? ' calendar-dragging' : ''}`} ref={gridRef}>
+      <div className={`grid-wrap${moveId || resizeId || createDraft ? ' calendar-dragging' : ''}`} ref={gridRef}>
         <div className="grid-inner">
         {hours.map((h) => (
           <div className="time-row" key={h}>
@@ -426,9 +537,23 @@ export default function Calendar() {
           </div>
         ))}
 
-        <div className="grid-click-layer" onClick={handleGridClick} />
+        <div className="grid-click-layer" onPointerDown={onGridPointerDown} />
 
         <div className="events-layer" ref={layerRef}>
+          {createDraft && (
+            <div
+              className="event create-preview"
+              style={{
+                top: `${minutesToTop(createDraft.start)}px`,
+                height: `${minutesToHeight(createDraft.start, createDraft.end)}px`,
+                left: '0',
+                width: 'calc(100% - 6px)',
+              }}
+            >
+              <div className="title">New event</div>
+              <div className="time">{formatRange(createDraft.start, createDraft.end)}</div>
+            </div>
+          )}
           {dayEvents.map((ev) => {
             const live = draft && draft.id === ev.id ? draft : ev
             const top = minutesToTop(live.start)
