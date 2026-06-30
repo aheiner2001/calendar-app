@@ -7,6 +7,7 @@ import { PlusIcon, RepeatIcon } from '../components/icons.jsx'
 import { layoutEvents } from '../lib/layout.js'
 import { eventsForDay } from '../lib/repeat.js'
 import { colorFill } from '../lib/settings.js'
+import { lockScrollWhileDragging } from '../lib/touchScrollLock.js'
 import {
   GRID_END_HOUR,
   GRID_START_HOUR,
@@ -177,11 +178,15 @@ export default function Calendar() {
       moved: false,
       cancelled: false,
       dragActive: false,
+      unlockScroll: null,
     }
 
     const clearDragVisuals = () => {
       el.classList.remove('hold-active')
       gridEl?.classList.remove('calendar-dragging')
+      document.body.classList.remove('calendar-dragging')
+      session.unlockScroll?.()
+      session.unlockScroll = null
     }
 
     const cleanupDragListeners = () => {
@@ -269,6 +274,8 @@ export default function Calendar() {
       session.dragActive = true
       el.classList.add('hold-active')
       gridEl?.classList.add('calendar-dragging')
+      document.body.classList.add('calendar-dragging')
+      session.unlockScroll = lockScrollWhileDragging(gridEl)
       try {
         el.setPointerCapture(session.pointerId)
       } catch {
@@ -299,6 +306,7 @@ export default function Calendar() {
     setDraft({ id: ev.id, ...cur })
     gridEl?.classList.add('calendar-dragging')
     document.body.classList.add('calendar-dragging')
+    const unlockScroll = lockScrollWhileDragging(gridEl)
     try {
       handle.setPointerCapture(e.pointerId)
     } catch {
@@ -320,6 +328,7 @@ export default function Calendar() {
       if (me.pointerId !== e.pointerId) return
       gridEl?.classList.remove('calendar-dragging')
       document.body.classList.remove('calendar-dragging')
+      unlockScroll()
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', endDrag)
       window.removeEventListener('pointercancel', endDrag)

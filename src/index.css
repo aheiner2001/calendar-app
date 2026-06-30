@@ -43,6 +43,7 @@ body{
 body.calendar-dragging{
   user-select:none;
   -webkit-user-select:none;
+  touch-action:none;
 }
 
 .app-shell{
@@ -300,7 +301,7 @@ body.light .theme-toggle .knob{ left:19px; }
 
 .grid-wrap.calendar-dragging{
   touch-action:none;
-  overscroll-behavior:contain;
+  overscroll-behavior:none;
 }
 
 /* Pages */
