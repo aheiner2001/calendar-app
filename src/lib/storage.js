@@ -16,6 +16,7 @@ const VIEW_KEY = 'calendar-view'
 const CALENDARS_KEY = 'calendar-calendars'
 const INVITES_KEY = 'calendar-invites'
 const ACTIVE_CALENDAR_KEY = 'calendar-active-id'
+const KNOWN_CALENDAR_IDS_KEY = 'calendar-known-ids'
 
 function cloudCalendarsKey(uid) {
   return `${CALENDARS_KEY}-${uid}`
@@ -53,7 +54,39 @@ function loadCloudCalendars(uid) {
 
 function saveCloudCalendars(uid, calendars) {
   if (!uid || uid === 'local') return
-  localStorage.setItem(cloudCalendarsKey(uid), JSON.stringify(calendars))
+  const existing = loadCloudCalendars(uid) || []
+  const map = new Map()
+  existing.forEach((c) => map.set(c.id, c))
+  calendars.forEach((c) => map.set(c.id, c))
+  localStorage.setItem(cloudCalendarsKey(uid), JSON.stringify([...map.values()]))
+}
+
+function knownCalendarIdsKey(uid) {
+  return `${KNOWN_CALENDAR_IDS_KEY}-${uid}`
+}
+
+function loadKnownCalendarIds(uid) {
+  if (!uid || uid === 'local') return []
+  try {
+    const raw = localStorage.getItem(knownCalendarIdsKey(uid))
+    if (raw) return JSON.parse(raw)
+  } catch {
+    /* ignore */
+  }
+  return []
+}
+
+function addKnownCalendarId(uid, id) {
+  if (!uid || uid === 'local' || !id) return
+  const ids = new Set(loadKnownCalendarIds(uid))
+  ids.add(id)
+  localStorage.setItem(knownCalendarIdsKey(uid), JSON.stringify([...ids]))
+}
+
+function removeKnownCalendarId(uid, id) {
+  if (!uid || uid === 'local' || !id) return
+  const ids = loadKnownCalendarIds(uid).filter((i) => i !== id)
+  localStorage.setItem(knownCalendarIdsKey(uid), JSON.stringify(ids))
 }
 
 function loadCloudEvents(uid) {
@@ -103,6 +136,9 @@ export {
   saveLocalCalendars,
   loadCloudCalendars,
   saveCloudCalendars,
+  loadKnownCalendarIds,
+  addKnownCalendarId,
+  removeKnownCalendarId,
   loadCloudEvents,
   saveCloudEvents,
   loadLocalInvites,

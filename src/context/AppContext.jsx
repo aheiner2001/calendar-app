@@ -15,6 +15,7 @@ import {
   getDoc,
   getDocFromServer,
   getDocs,
+  getDocsFromServer,
   onSnapshot,
   query,
   setDoc,
@@ -36,10 +37,13 @@ import { migrate, toFirestoreEvent } from '../lib/events.js'
 import { eventsForDay } from '../lib/repeat.js'
 import {
   ACTIVE_CALENDAR_KEY,
+  addKnownCalendarId,
   loadCloudCalendars,
   loadCloudEvents,
+  loadKnownCalendarIds,
   loadLocalCalendars,
   loadLocalInvites,
+  removeKnownCalendarId,
   saveCloudCalendars,
   saveCloudEvents,
   saveLocalCalendars,
@@ -229,36 +233,62 @@ export function AppProvider({ children }) {
     if (!user) return
 
     let cancelled = false
-    let unsubMember = () => {}
-    let unsubOwner = () => {}
+    let unsub = () => {}
 
     const memberQuery = query(
       collection(db, 'calendars'),
       where('members', 'array-contains', user.uid),
     )
-    const ownerQuery = query(collection(db, 'calendars'), where('ownerId', '==', user.uid))
 
-    let memberCals = []
-    let ownerCals = []
-
+    let queryCals = []
     const docToCal = (d) => ({ id: d.id, ...d.data() })
 
-    const mergeCalendars = () => {
+    const mergeCalendars = async () => {
       if (cancelled) return
-      const serverIds = new Set([...memberCals, ...ownerCals].map((c) => c.id))
-      for (const id of pendingCalendarsRef.current.keys()) {
-        if (serverIds.has(id)) pendingCalendarsRef.current.delete(id)
-      }
 
       const map = new Map()
       pendingCalendarsRef.current.forEach((cal, id) => map.set(id, cal))
-      memberCals.forEach((cal) => map.set(cal.id, cal))
-      ownerCals.forEach((cal) => map.set(cal.id, cal))
+      queryCals.forEach((cal) => map.set(cal.id, cal))
+
+      const cached = loadCloudCalendars(user.uid) || []
+      cached.forEach((cal) => {
+        if (!map.has(cal.id)) map.set(cal.id, cal)
+      })
+
+      const knownIds = loadKnownCalendarIds(user.uid)
+      const missingIds = knownIds.filter((id) => !map.has(id))
+      if (missingIds.length) {
+        const fetched = await Promise.all(
+          missingIds.map(async (id) => {
+            try {
+              const snap = await getDocFromServer(doc(db, 'calendars', id))
+              if (!snap.exists()) {
+                removeKnownCalendarId(user.uid, id)
+                return null
+              }
+              return docToCal(snap)
+            } catch (err) {
+              console.error(`Calendar fetch error (${id}):`, err)
+              return cached.find((c) => c.id === id) || null
+            }
+          }),
+        )
+        fetched.filter(Boolean).forEach((cal) => {
+        map.set(cal.id, cal)
+        pendingCalendarsRef.current.delete(cal.id)
+      })
+      }
+
+      queryCals.forEach((cal) => {
+        if (pendingCalendarsRef.current.has(cal.id)) pendingCalendarsRef.current.delete(cal.id)
+      })
 
       const pid = personalCalendarId(user.uid)
       if (!map.has(pid)) map.set(pid, defaultPersonalCalendar(user.uid))
 
-      setCalendars([...map.values()])
+      const merged = [...map.values()]
+      setCalendars(merged)
+      saveCloudCalendars(user.uid, merged)
       setSyncState('synced')
       setLastSynced(new Date())
     }
@@ -268,11 +298,10 @@ export function AppProvider({ children }) {
 
       const cached = loadCloudCalendars(user.uid)
       if (cached?.length) {
-        const map = new Map()
-        cached.forEach((cal) => map.set(cal.id, cal))
-        const pid = personalCalendarId(user.uid)
-        if (!map.has(pid)) map.set(pid, defaultPersonalCalendar(user.uid))
-        setCalendars([...map.values()])
+        setCalendars(cached)
+        cached
+          .filter((c) => c.type === 'shared')
+          .forEach((c) => addKnownCalendarId(user.uid, c.id))
       }
 
       try {
@@ -289,58 +318,26 @@ export function AppProvider({ children }) {
         }
         if (cancelled) return
 
-        const [memberSnap, ownerSnap] = await Promise.all([getDocs(memberQuery), getDocs(ownerQuery)])
-        memberCals = memberSnap.docs.map(docToCal)
-        ownerCals = ownerSnap.docs.map(docToCal)
+        const memberSnap = await getDocsFromServer(memberQuery)
+        queryCals = memberSnap.docs.map(docToCal)
+        await mergeCalendars()
 
-        const serverIds = new Set([...memberCals, ...ownerCals].map((c) => c.id))
-        const cachedCals = loadCloudCalendars(user.uid) || []
-        const missing = cachedCals.filter((c) => c.type !== 'personal' && !serverIds.has(c.id))
-        if (missing.length) {
-          const extras = await Promise.all(
-            missing.map(async (c) => {
-              try {
-                const snap = await getDoc(doc(db, 'calendars', c.id))
-                return snap.exists() ? docToCal(snap) : null
-              } catch {
-                return null
-              }
-            }),
-          )
-          extras.filter(Boolean).forEach((cal) => ownerCals.push(cal))
-        }
-
-        mergeCalendars()
-
-        unsubMember = onSnapshot(
+        unsub = onSnapshot(
           memberQuery,
           (snapshot) => {
             if (snapshot.metadata.fromCache && snapshot.empty) return
-            memberCals = snapshot.docs.map(docToCal)
+            queryCals = snapshot.docs.map(docToCal)
             mergeCalendars()
           },
           (err) => {
-            console.error('Calendars listener error (members):', err)
-            if (!cancelled) setSyncState('error')
-          },
-        )
-
-        unsubOwner = onSnapshot(
-          ownerQuery,
-          (snapshot) => {
-            if (snapshot.metadata.fromCache && snapshot.empty) return
-            ownerCals = snapshot.docs.map(docToCal)
-            mergeCalendars()
-          },
-          (err) => {
-            console.error('Calendars listener error (owner):', err)
+            console.error('Calendars listener error:', err)
             if (!cancelled) setSyncState('error')
           },
         )
       } catch (err) {
         console.error('Calendar boot error:', err)
         if (!cancelled) {
-          mergeCalendars()
+          await mergeCalendars()
           setSyncState('error')
         }
       }
@@ -350,8 +347,7 @@ export function AppProvider({ children }) {
 
     return () => {
       cancelled = true
-      unsubMember()
-      unsubOwner()
+      unsub()
     }
   }, [user, ensurePersonalCalendar, acceptEmailInvites])
 
@@ -642,8 +638,10 @@ export function AppProvider({ children }) {
         expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
       })
       const newCal = { id, ...cal }
+      addKnownCalendarId(user.uid, id)
       pendingCalendarsRef.current.set(id, newCal)
       setCalendars((prev) => (prev.some((c) => c.id === id) ? prev : [...prev, newCal]))
+      saveCloudCalendars(user.uid, [newCal])
       return newCal
     },
     [user, uid],
@@ -774,6 +772,8 @@ export function AppProvider({ children }) {
         }
         return [...prev, joinedCal]
       })
+      addKnownCalendarId(user.uid, joinedCal.id)
+      saveCloudCalendars(user.uid, [joinedCal])
       if (!inv.email && !inv.permanent) await deleteDoc(invDoc.ref)
       return inv.calendarName
     },
@@ -806,6 +806,7 @@ export function AppProvider({ children }) {
       if (!isOwner) {
         await setDoc(doc(db, 'calendars', calendarId), { members: arrayRemove(user.uid) }, { merge: true })
         pendingCalendarsRef.current.delete(calendarId)
+        removeKnownCalendarId(user.uid, calendarId)
         setCalendars((prev) => prev.filter((c) => c.id !== calendarId))
         clearActive()
         return
@@ -824,6 +825,7 @@ export function AppProvider({ children }) {
 
       setCalendars((prev) => prev.filter((c) => c.id !== calendarId))
       pendingCalendarsRef.current.delete(calendarId)
+      removeKnownCalendarId(user.uid, calendarId)
       setAllEvents((prev) => prev.filter((e) => e.calendarId !== calendarId))
       clearActive()
     },
