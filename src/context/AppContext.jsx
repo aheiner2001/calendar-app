@@ -56,7 +56,7 @@ function loadSettings() {
 }
 
 export function AppProvider({ children }) {
-  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || 'dark')
+  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || 'light')
   const [selectedDate, setSelectedDate] = useState(() => new Date())
   const [settings, setSettings] = useState(loadSettings)
   const [events, setEvents] = useState([])
