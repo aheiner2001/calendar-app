@@ -589,9 +589,7 @@ export function AppProvider({ children }) {
       } catch (err) {
         const msg = String(err?.message || err?.code || '')
         if (msg.includes('permission') || err?.code === 'permission-denied') {
-          throw new Error(
-            'Could not save calendar. Set App Check to Monitor (not Enforce) in Firebase Console, or add VITE_RECAPTCHA_SITE_KEY to .env.',
-          )
+          throw new Error('Could not save calendar. Check that you are signed in and try again.')
         }
         throw err
       }
