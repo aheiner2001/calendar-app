@@ -2,10 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function personalCal(uid) {
-      return 'personal-' + uid;
-    }
-
     function isSignedIn() {
       return request.auth != null;
     }
@@ -14,39 +10,24 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/calendars/$(calendarId));
     }
 
-    function isPersonalCalendar(calendarId) {
-      return isSignedIn() && calendarId == personalCal(request.auth.uid);
-    }
-
     function isCalendarMember(calendarId) {
-      return isSignedIn() && (
-        isPersonalCalendar(calendarId)
-        || (
-          exists(/databases/$(database)/documents/calendars/$(calendarId))
-          && calendarDoc(calendarId).data.ownerId == request.auth.uid
-        )
-        || (
-          exists(/databases/$(database)/documents/calendars/$(calendarId))
-          && calendarDoc(calendarId).data.keys().hasAll(['members'])
-          && calendarDoc(calendarId).data.members is list
-          && calendarDoc(calendarId).data.members.hasAny([request.auth.uid])
-        )
-      );
-    }
-
-    function isCalendarOwner(calendarId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/calendars/$(calendarId))
-        && calendarDoc(calendarId).data.ownerId == request.auth.uid;
+        && (
+          calendarDoc(calendarId).data.ownerId == request.auth.uid
+          || (
+            calendarDoc(calendarId).data.members is list
+            && calendarDoc(calendarId).data.members.hasAny([request.auth.uid])
+          )
+        );
     }
 
     match /calendars/{calendarId} {
+      // List queries use members array-contains or ownerId == uid — both allowed here.
       allow read: if isSignedIn() && (
-        isPersonalCalendar(calendarId)
-        || resource.data.ownerId == request.auth.uid
+        resource.data.ownerId == request.auth.uid
         || (
-          resource.data.keys().hasAll(['members'])
-          && resource.data.members is list
+          resource.data.members is list
           && resource.data.members.hasAny([request.auth.uid])
         )
       );
@@ -59,8 +40,7 @@ service cloud.firestore {
       allow update: if isSignedIn() && (
         resource.data.ownerId == request.auth.uid
         || (
-          resource.data.keys().hasAll(['members'])
-          && resource.data.members is list
+          resource.data.members is list
           && resource.data.members.hasAny([request.auth.uid])
         )
       );
@@ -78,9 +58,10 @@ service cloud.firestore {
     }
 
     match /events/{eventId} {
+      // Primary list query: where('userId', '==', uid)
       allow read: if isSignedIn() && (
         resource.data.userId == request.auth.uid
-        || (resource.data.keys().hasAll(['calendarId']) && isCalendarMember(resource.data.calendarId))
+        || isCalendarMember(resource.data.calendarId)
       );
 
       allow create: if isSignedIn()
@@ -92,10 +73,9 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid
         && isCalendarMember(request.resource.data.calendarId);
 
-      // Owners can delete their own events; calendar owners can delete any event on that calendar
       allow delete: if isSignedIn() && (
         resource.data.userId == request.auth.uid
-        || (resource.data.keys().hasAll(['calendarId']) && isCalendarOwner(resource.data.calendarId))
+        || isCalendarMember(resource.data.calendarId)
       );
     }
 

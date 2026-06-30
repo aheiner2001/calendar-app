@@ -37,9 +37,11 @@ import { eventsForDay } from '../lib/repeat.js'
 import {
   ACTIVE_CALENDAR_KEY,
   loadCloudCalendars,
+  loadCloudEvents,
   loadLocalCalendars,
   loadLocalInvites,
   saveCloudCalendars,
+  saveCloudEvents,
   saveLocalCalendars,
   saveLocalInvites,
   SETTINGS_KEY,
@@ -274,6 +276,7 @@ export function AppProvider({ children }) {
       }
 
       try {
+        await user.getIdToken()
         try {
           await ensurePersonalCalendar(user)
         } catch (err) {
@@ -312,6 +315,7 @@ export function AppProvider({ children }) {
         unsubMember = onSnapshot(
           memberQuery,
           (snapshot) => {
+            if (snapshot.metadata.fromCache && snapshot.empty) return
             memberCals = snapshot.docs.map(docToCal)
             mergeCalendars()
           },
@@ -324,6 +328,7 @@ export function AppProvider({ children }) {
         unsubOwner = onSnapshot(
           ownerQuery,
           (snapshot) => {
+            if (snapshot.metadata.fromCache && snapshot.empty) return
             ownerCals = snapshot.docs.map(docToCal)
             mergeCalendars()
           },
@@ -353,17 +358,23 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (!firebaseEnabled || !user) return
 
-    const pid = personalCalendarId(user.uid)
-    const ids = [...new Set([pid, ...calendars.map((c) => c.id)])].slice(0, 30)
-
     let cancelled = false
-    let unsubByCalendar = () => {}
-    let unsubLegacy = () => {}
+    const unsubs = []
+    let ownEvents = []
+    const sharedEvents = new Map()
 
-    const mergeEvents = (byCalendar, legacy) => {
+    const cached = loadCloudEvents(user.uid)
+    if (cached?.length) {
+      setAllEvents(cached.map((e) => migrate(e, user.uid)))
+    }
+
+    const mergeEvents = () => {
       if (cancelled) return
 
-      const serverIds = new Set([...byCalendar, ...legacy].map((e) => e.id))
+      const serverIds = new Set()
+      ownEvents.forEach((e) => serverIds.add(e.id))
+      sharedEvents.forEach((list) => list.forEach((e) => serverIds.add(e.id)))
+
       for (const id of pendingDeletesRef.current) {
         if (!serverIds.has(id)) pendingDeletesRef.current.delete(id)
       }
@@ -372,11 +383,13 @@ export function AppProvider({ children }) {
       }
 
       const map = new Map()
-      byCalendar.forEach((e) => {
+      ownEvents.forEach((e) => {
         if (!pendingDeletesRef.current.has(e.id)) map.set(e.id, e)
       })
-      legacy.forEach((e) => {
-        if (!pendingDeletesRef.current.has(e.id)) map.set(e.id, e)
+      sharedEvents.forEach((list) => {
+        list.forEach((e) => {
+          if (!pendingDeletesRef.current.has(e.id)) map.set(e.id, e)
+        })
       })
       pendingAddsRef.current.forEach((e, id) => {
         if (!map.has(id)) map.set(id, e)
@@ -386,50 +399,75 @@ export function AppProvider({ children }) {
       setLastSynced(new Date())
     }
 
-    let byCalendar = []
-    let legacy = []
+    const docToEvent = (d) => migrate({ id: d.id, ...d.data() }, user.uid)
 
-    const loadEvents = async () => {
+    const ownQuery = query(collection(db, 'events'), where('userId', '==', user.uid))
+
+    const boot = async () => {
       try {
-        const snap = await getDocs(query(collection(db, 'events'), where('calendarId', 'in', ids)))
+        await user.getIdToken()
+        const snap = await getDocs(ownQuery)
         if (!cancelled) {
-          byCalendar = snap.docs.map((d) => migrate({ id: d.id, ...d.data() }, user.uid))
-          mergeEvents(byCalendar, legacy)
+          ownEvents = snap.docs.map(docToEvent)
+          mergeEvents()
         }
       } catch (err) {
         console.error('Events load error:', err)
+        if (!cancelled) setSyncState('error')
+      }
+
+      unsubs.push(
+        onSnapshot(
+          ownQuery,
+          (snapshot) => {
+            if (snapshot.metadata.fromCache && snapshot.empty) return
+            ownEvents = snapshot.docs.map(docToEvent)
+            mergeEvents()
+          },
+          (err) => {
+            console.error('Events listener error:', err)
+            if (!cancelled) setSyncState('error')
+          },
+        ),
+      )
+
+      for (const cal of calendars.filter((c) => c.type === 'shared')) {
+        const sharedQuery = query(collection(db, 'events'), where('calendarId', '==', cal.id))
+        try {
+          const snap = await getDocs(sharedQuery)
+          if (!cancelled) {
+            sharedEvents.set(
+              cal.id,
+              snap.docs.map(docToEvent).filter((e) => e.userId !== user.uid),
+            )
+            mergeEvents()
+          }
+        } catch (err) {
+          console.error(`Events load error (${cal.id}):`, err)
+        }
+
+        unsubs.push(
+          onSnapshot(
+            sharedQuery,
+            (snapshot) => {
+              if (snapshot.metadata.fromCache && snapshot.empty) return
+              sharedEvents.set(
+                cal.id,
+                snapshot.docs.map(docToEvent).filter((e) => e.userId !== user.uid),
+              )
+              mergeEvents()
+            },
+            (err) => console.error(`Events listener error (${cal.id}):`, err),
+          ),
+        )
       }
     }
 
-    loadEvents()
-
-    unsubByCalendar = onSnapshot(
-      query(collection(db, 'events'), where('calendarId', 'in', ids)),
-      (snapshot) => {
-        byCalendar = snapshot.docs.map((d) => migrate({ id: d.id, ...d.data() }, user.uid))
-        mergeEvents(byCalendar, legacy)
-      },
-      (err) => {
-        console.error('Events listener error:', err)
-        if (!cancelled) setSyncState('error')
-      },
-    )
-
-    unsubLegacy = onSnapshot(
-      query(collection(db, 'events'), where('userId', '==', user.uid)),
-      (snapshot) => {
-        legacy = snapshot.docs
-          .filter((d) => !d.data().calendarId)
-          .map((d) => migrate({ id: d.id, ...d.data() }, user.uid))
-        mergeEvents(byCalendar, legacy)
-      },
-      () => {},
-    )
+    boot()
 
     return () => {
       cancelled = true
-      unsubByCalendar()
-      unsubLegacy()
+      unsubs.forEach((u) => u())
     }
   }, [user, calendars])
 
@@ -439,8 +477,9 @@ export function AppProvider({ children }) {
       saveLocalCalendars(calendars)
       return
     }
-    if (user && calendars.length) {
-      saveCloudCalendars(user.uid, calendars)
+    if (user) {
+      if (calendars.length) saveCloudCalendars(user.uid, calendars)
+      if (allEvents.length) saveCloudEvents(user.uid, allEvents)
     }
   }, [allEvents, calendars, user])
 
