@@ -1,8 +1,6 @@
-import { initializeApp } from 'firebase/app'
-import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
-import { initializeAuth } from 'firebase/auth'
+import { getApp, getApps, initializeApp } from 'firebase/app'
+import { getAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
-import { authPersistence } from './authSignIn.js'
 
 const config = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -15,27 +13,13 @@ const config = {
 
 export const firebaseEnabled = Boolean(config.apiKey && config.projectId)
 
-const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY
-
 let app = null
 let db = null
 let auth = null
 
 if (firebaseEnabled) {
-  app = initializeApp(config)
-  auth = initializeAuth(app, { persistence: authPersistence })
-
-  if (import.meta.env.DEV && import.meta.env.VITE_APP_CHECK_DEBUG_TOKEN) {
-    self.FIREBASE_APPCHECK_DEBUG_TOKEN = import.meta.env.VITE_APP_CHECK_DEBUG_TOKEN
-  }
-
-  if (recaptchaSiteKey) {
-    initializeAppCheck(app, {
-      provider: new ReCaptchaV3Provider(recaptchaSiteKey),
-      isTokenAutoRefreshEnabled: true,
-    })
-  }
-
+  app = getApps().length === 0 ? initializeApp(config) : getApp()
+  auth = getAuth(app)
   db = getFirestore(app)
 }
 

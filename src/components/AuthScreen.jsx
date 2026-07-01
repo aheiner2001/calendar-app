@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import { auth } from '../lib/firebase.js'
 import {
+  clearStaleAuthPending,
   copyAppUrl,
   detectBraveBrowser,
   detectInAppBrowser,
@@ -20,9 +21,10 @@ export default function AuthScreen() {
     theme,
     toggleTheme,
     authError,
+    firebaseEnabled,
   } = useApp()
   const [error, setError] = useState('')
-  const [busy, setBusy] = useState(() => Boolean(peekAuthPending()))
+  const [busy, setBusy] = useState(false)
   const [email, setEmail] = useState('')
   const [emailSent, setEmailSent] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -32,17 +34,29 @@ export default function AuthScreen() {
   const displayError = error || authError
 
   useEffect(() => {
-    if (!peekAuthPending()) setBusy(false)
-  }, [authError])
+    clearStaleAuthPending()
+  }, [])
 
   const run = async (fn) => {
+    if (!auth) {
+      setError('Firebase Auth is not ready. Check .env and refresh the page.')
+      return
+    }
     setError('')
     setBusy(true)
     try {
       const mode = await fn()
-      if (mode === 'redirect') return
+      if (mode === 'redirect') {
+        window.setTimeout(() => {
+          if (!peekAuthPending()) return
+          setBusy(false)
+          setError('Sign-in did not open. Allow popups, or try Chrome/Safari.')
+        }, 10000)
+        return
+      }
       setBusy(false)
     } catch (err) {
+      console.error('Sign-in failed:', err)
       setError(friendlyError(err))
       setBusy(false)
     }
@@ -88,6 +102,17 @@ export default function AuthScreen() {
       <div className="auth-card">
         <h1>Area Book</h1>
         <p className="auth-sub">Sign in to sync your calendar across devices.</p>
+
+        {!firebaseEnabled && (
+          <p className="auth-error">
+            Firebase is not configured. Copy <code>.env.example</code> to <code>.env</code> and add
+            your Firebase keys, then restart the dev server.
+          </p>
+        )}
+
+        {!auth && firebaseEnabled && (
+          <p className="auth-error">Firebase Auth failed to start. Hard refresh the page.</p>
+        )}
 
         {inAppBrowser && (
           <div className="auth-inapp-panel">
@@ -191,7 +216,7 @@ export default function AuthScreen() {
           <button
             type="button"
             className="auth-oauth-btn"
-            disabled={busy}
+            disabled={busy || !auth}
             onClick={() => run(signInWithGoogle)}
           >
             <GoogleIcon />
@@ -200,7 +225,7 @@ export default function AuthScreen() {
           <button
             type="button"
             className="auth-oauth-btn auth-oauth-apple"
-            disabled={busy}
+            disabled={busy || !auth}
             onClick={() => run(signInWithApple)}
           >
             <AppleIcon />
@@ -251,6 +276,9 @@ function friendlyError(err) {
   }
   if (code === 'auth/invalid-email') {
     return 'That email address looks invalid.'
+  }
+  if (code === 'auth/argument-error') {
+    return message || 'Sign-in could not start. Refresh and try again in Chrome or Safari.'
   }
   return err?.message || 'Something went wrong. Try again.'
 }

@@ -217,19 +217,21 @@ export function AppProvider({ children }) {
   }, [])
 
   const signInWithGoogle = useCallback(async () => {
+    if (!auth) throw new Error('Firebase Auth is not ready.')
     setAuthError('')
     return signInWithOAuth(auth, new GoogleAuthProvider(), 'google')
   }, [])
 
   const signInWithApple = useCallback(async () => {
+    if (!auth) throw new Error('Firebase Auth is not ready.')
     setAuthError('')
     const provider = new OAuthProvider('apple.com')
     provider.addScope('email')
-    provider.addScope('name')
     return signInWithOAuth(auth, provider, 'apple')
   }, [])
 
   const sendSignInEmail = useCallback(async (email) => {
+    if (!auth) throw new Error('Firebase Auth is not ready.')
     setAuthError('')
     await sendEmailSignInLink(auth, email)
   }, [])

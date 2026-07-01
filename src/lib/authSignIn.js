@@ -1,10 +1,9 @@
 import {
-  browserLocalPersistence,
   getRedirectResult,
-  indexedDBLocalPersistence,
   isSignInWithEmailLink,
   sendSignInLinkToEmail,
   signInWithEmailLink,
+  signInWithPopup,
   signInWithRedirect,
 } from 'firebase/auth'
 
@@ -33,8 +32,14 @@ export function detectBraveBrowser() {
 
 /** True when the URL is a returning email sign-in link. */
 export function isEmailLinkSignIn(auth) {
-  if (typeof window === 'undefined') return false
-  return isSignInWithEmailLink(auth, window.location.href)
+  if (typeof window === 'undefined' || !auth) return false
+  const href = window.location.href
+  if (!href.includes('oobCode=') || !href.includes('mode=signIn')) return false
+  try {
+    return isSignInWithEmailLink(auth, href)
+  } catch {
+    return false
+  }
 }
 
 export function getAppOriginUrl() {
@@ -85,9 +90,16 @@ export async function sendEmailSignInLink(auth, email) {
 }
 
 export async function finishEmailLinkSignIn(auth, email) {
-  if (typeof window === 'undefined') return { ok: true }
+  if (typeof window === 'undefined' || !auth) return { ok: true }
   const href = window.location.href
-  if (!isSignInWithEmailLink(auth, href)) return { ok: true }
+  if (!href.includes('oobCode=') || !href.includes('mode=signIn')) return { ok: true }
+  let isLink = false
+  try {
+    isLink = isSignInWithEmailLink(auth, href)
+  } catch {
+    return { ok: true }
+  }
+  if (!isLink) return { ok: true }
 
   const resolved = (email || storageGet(EMAIL_FOR_SIGN_IN_KEY) || '').trim()
   if (!resolved) {
@@ -159,6 +171,20 @@ export function clearAuthPending() {
   storageRemove(REDIRECT_STARTED_KEY)
 }
 
+/** Drop leftover pending flags from an abandoned redirect (common after failed sign-in). */
+export function clearStaleAuthPending(maxAgeMs = 5 * 60 * 1000) {
+  const pending = peekAuthPending()
+  if (!pending) return
+  const href = typeof window !== 'undefined' ? window.location.href : ''
+  const returningFromProvider =
+    href.includes('apiKey=') || href.includes('oobCode=') || href.includes('authType=')
+  if (returningFromProvider) return
+  const started = Number(storageGet(REDIRECT_STARTED_KEY) || 0)
+  if (!started || Date.now() - started > maxAgeMs) {
+    clearAuthPending()
+  }
+}
+
 export function consumeAuthPending() {
   const value = storageGet(AUTH_PENDING_KEY)
   clearAuthPending()
@@ -193,6 +219,9 @@ export function friendlyAuthError(err, pending) {
   }
   if (code === 'auth/missing-email') {
     return 'Enter your email address.'
+  }
+  if (code === 'auth/argument-error') {
+    return message || 'Sign-in could not start. Refresh and try again in Chrome or Safari.'
   }
   if (code === 'auth/account-exists-with-different-credential') {
     return 'An account already exists with this email using a different sign-in method. Try the other button (Google or Apple).'
@@ -231,13 +260,19 @@ export function friendlyAuthError(err, pending) {
  * @returns {Promise<import('firebase/auth').UserCredential | 'redirect'>}
  */
 export async function signInWithOAuth(auth, provider, pending = 'oauth') {
+  if (!auth) {
+    throw new Error('Firebase Auth is not ready. Check your .env Firebase config and refresh.')
+  }
+
+  await auth.authStateReady()
+
   if (!shouldUseRedirect()) {
     try {
-      const { signInWithPopup } = await import('firebase/auth')
       const result = await signInWithPopup(auth, provider)
       clearAuthPending()
       return result
     } catch (err) {
+      console.error('Sign-in popup failed:', err)
       if (err?.code === 'auth/popup-blocked' || err?.code === 'auth/cancelled-popup-request') {
         markAuthPending(pending)
         await signInWithRedirect(auth, provider)
@@ -253,6 +288,9 @@ export async function signInWithOAuth(auth, provider, pending = 'oauth') {
 }
 
 async function finishRedirectSignIn(auth) {
+  if (!auth) return { ok: true }
+
+  clearStaleAuthPending()
   const emailOutcome = await finishEmailLinkSignIn(auth)
   if (emailOutcome.ok && auth.currentUser) {
     clearAuthPending()
@@ -275,6 +313,7 @@ async function finishRedirectSignIn(auth) {
     result = await getRedirectResult(auth)
   } catch (error) {
     err = error
+    console.error('getRedirectResult failed:', error)
   }
 
   if (result?.user || auth.currentUser) {
@@ -284,6 +323,10 @@ async function finishRedirectSignIn(auth) {
 
   if (err) {
     const pendingProvider = consumeAuthPending()
+    // Benign argument-error on load when there was no redirect in progress.
+    if (err?.code === 'auth/argument-error' && !pendingProvider && !pending) {
+      return { ok: true }
+    }
     return {
       ok: false,
       message: friendlyAuthError(err, pendingProvider || pending),
@@ -322,5 +365,3 @@ export function completeRedirectSignIn(auth) {
   }
   return redirectResultPromise
 }
-
-export const authPersistence = [indexedDBLocalPersistence, browserLocalPersistence]
