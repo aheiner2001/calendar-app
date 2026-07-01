@@ -1499,6 +1499,8 @@ body.light .auth-oauth-apple{ background:#000; color:#fff; border-color:#000; }
   line-height:1.5;
   text-align:center;
 }
+.auth-deploy-hint{ margin-top:0; margin-bottom:12px; }
+.auth-deploy-hint strong{ color:var(--text); font-weight:600; }
 .auth-busy{ color:var(--text-dim); font-size:13px; margin-top:10px; text-align:center; }
 .auth-theme{ position:absolute; top:20px; right:20px; }
 .sync-signout{

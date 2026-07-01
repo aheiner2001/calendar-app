@@ -100,10 +100,22 @@ export default function AuthScreen() {
 
         {!firebaseEnabled && (
           <p className="auth-error">
-            Firebase is not configured. Copy <code>.env.example</code> to <code>.env</code> and add
-            your Firebase keys, then restart the dev server.
+            Firebase is not configured. Locally: copy <code>.env.example</code> to <code>.env</code>{' '}
+            and restart the dev server. On GitHub Pages: add <code>VITE_FIREBASE_*</code> secrets in
+            the repo&apos;s Actions settings and redeploy.
           </p>
         )}
+
+        {firebaseEnabled &&
+          typeof window !== 'undefined' &&
+          window.location.hostname.endsWith('github.io') &&
+          !displayError && (
+            <p className="auth-hint auth-deploy-hint">
+              Live site: use{' '}
+              <strong>https://aheiner2001.github.io/calendar-app/</strong> (include the trailing
+              slash).
+            </p>
+          )}
 
         {!auth && firebaseEnabled && (
           <p className="auth-error">Firebase Auth failed to start. Hard refresh the page.</p>

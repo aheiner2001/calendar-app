@@ -214,10 +214,9 @@ export function consumeAuthPending() {
   return value
 }
 
+/** Full-page redirect only inside Discord/Messenger etc. Popup works on GitHub Pages and mobile Safari. */
 function shouldUseRedirect() {
-  if (import.meta.env.DEV) return false
-  if (detectInAppBrowser()) return true
-  return /iPhone|iPod|Android/i.test(navigator.userAgent || '')
+  return Boolean(detectInAppBrowser())
 }
 
 function wait(ms) {
@@ -229,7 +228,10 @@ export function friendlyAuthError(err, pending) {
   const message = err?.message || ''
 
   if (code === 'auth/unauthorized-domain') {
-    return 'This site is not authorized for sign-in yet. Ask the app owner to add this domain in Firebase Authentication settings.'
+    if (typeof window !== 'undefined' && window.location.hostname.endsWith('github.io')) {
+      return 'This domain is not authorized in Firebase. Add aheiner2001.github.io under Authentication → Settings → Authorized domains, and add https://aheiner2001.github.io as a Google OAuth JavaScript origin.'
+    }
+    return 'This site is not authorized for sign-in yet. Add this domain in Firebase Authentication → Settings → Authorized domains.'
   }
   if (code === 'auth/operation-not-allowed') {
     return 'This sign-in method is not enabled in Firebase yet.'
