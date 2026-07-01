@@ -49,6 +49,29 @@ export function getAppOriginUrl() {
   return `${window.location.origin}${path}`
 }
 
+export function cleanAuthParamsFromUrl() {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  const keys = ['apiKey', 'oobCode', 'mode', 'authType', 'tenantId', 'lang']
+  let changed = false
+  keys.forEach((key) => {
+    if (url.searchParams.has(key)) {
+      url.searchParams.delete(key)
+      changed = true
+    }
+  })
+  if (!changed) return
+  const qs = url.searchParams.toString()
+  const next = url.pathname + (qs ? `?${qs}` : '') + url.hash
+  window.history.replaceState({}, document.title, next)
+}
+
+function isOAuthReturnUrl() {
+  if (typeof window === 'undefined') return false
+  const href = window.location.href
+  return href.includes('apiKey=') && href.includes('authType=')
+}
+
 export async function copyAppUrl() {
   const url = getAppOriginUrl()
   if (navigator.clipboard?.writeText) {
@@ -191,13 +214,10 @@ export function consumeAuthPending() {
   return value
 }
 
-function isMobileDevice() {
-  if (typeof navigator === 'undefined') return false
-  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '')
-}
-
 function shouldUseRedirect() {
-  return isMobileDevice() || Boolean(detectInAppBrowser())
+  if (import.meta.env.DEV) return false
+  if (detectInAppBrowser()) return true
+  return /iPhone|iPod|Android/i.test(navigator.userAgent || '')
 }
 
 function wait(ms) {
@@ -290,7 +310,29 @@ export async function signInWithOAuth(auth, provider, pending = 'oauth') {
 async function finishRedirectSignIn(auth) {
   if (!auth) return { ok: true }
 
-  clearStaleAuthPending()
+  await auth.authStateReady()
+
+  const pending = peekAuthPending()
+  const oauthReturn = isOAuthReturnUrl()
+
+  // Must run before onAuthStateChanged and before clearing pending flags.
+  let result = null
+  let err = null
+  if (oauthReturn || pending) {
+    try {
+      result = await getRedirectResult(auth)
+    } catch (error) {
+      err = error
+      console.error('getRedirectResult failed:', error)
+    }
+  }
+
+  if (result?.user || auth.currentUser) {
+    clearAuthPending()
+    cleanAuthParamsFromUrl()
+    return { ok: true }
+  }
+
   const emailOutcome = await finishEmailLinkSignIn(auth)
   if (emailOutcome.ok && auth.currentUser) {
     clearAuthPending()
@@ -303,27 +345,8 @@ async function finishRedirectSignIn(auth) {
     return emailOutcome
   }
 
-  const pending = peekAuthPending()
-
-  await auth.authStateReady()
-
-  let result = null
-  let err = null
-  try {
-    result = await getRedirectResult(auth)
-  } catch (error) {
-    err = error
-    console.error('getRedirectResult failed:', error)
-  }
-
-  if (result?.user || auth.currentUser) {
-    clearAuthPending()
-    return { ok: true }
-  }
-
   if (err) {
     const pendingProvider = consumeAuthPending()
-    // Benign argument-error on load when there was no redirect in progress.
     if (err?.code === 'auth/argument-error' && !pendingProvider && !pending) {
       return { ok: true }
     }
@@ -334,13 +357,13 @@ async function finishRedirectSignIn(auth) {
     }
   }
 
-  if (pending) {
-    // Mobile browsers sometimes apply auth state slightly after getRedirectResult.
+  if (pending || oauthReturn) {
     for (const delay of [400, 800, 1200]) {
       await wait(delay)
       await auth.authStateReady()
       if (auth.currentUser) {
         clearAuthPending()
+        cleanAuthParamsFromUrl()
         return { ok: true }
       }
     }
@@ -355,6 +378,7 @@ async function finishRedirectSignIn(auth) {
     }
   }
 
+  clearStaleAuthPending()
   return { ok: true }
 }
 

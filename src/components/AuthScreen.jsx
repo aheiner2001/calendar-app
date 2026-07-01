@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import { auth } from '../lib/firebase.js'
 import {
-  clearStaleAuthPending,
   copyAppUrl,
   detectBraveBrowser,
   detectInAppBrowser,
@@ -32,10 +31,6 @@ export default function AuthScreen() {
   const braveBrowser = detectBraveBrowser()
   const emailLinkPending = isEmailLinkSignIn(auth)
   const displayError = error || authError
-
-  useEffect(() => {
-    clearStaleAuthPending()
-  }, [])
 
   const run = async (fn) => {
     if (!auth) {

@@ -161,9 +161,10 @@ export function AppProvider({ children }) {
     }
 
     let cancelled = false
-    setAuthLoading(true)
+    let unsub = () => {}
 
-    const finishBootstrap = async () => {
+    async function initAuth() {
+      setAuthLoading(true)
       try {
         const outcome = await completeRedirectSignIn(auth)
         if (cancelled) return
@@ -171,15 +172,9 @@ export function AppProvider({ children }) {
         await auth.authStateReady()
         if (auth.currentUser) {
           setAuthError('')
-          return
-        }
-
-        if (!outcome.ok && outcome.needsEmail) {
+        } else if (!outcome.ok && outcome.needsEmail) {
           setAuthError(outcome.message || 'Confirm your email to finish signing in.')
-          return
-        }
-
-        if (!outcome.ok && outcome.message) {
+        } else if (!outcome.ok && outcome.message) {
           setAuthError(outcome.message)
         }
       } catch (err) {
@@ -188,27 +183,34 @@ export function AppProvider({ children }) {
           setAuthError(err.message || 'Sign-in failed after redirect')
         }
       }
+
+      if (cancelled) return
+
+      if (auth.currentUser) {
+        setUser(auth.currentUser)
+        setAuthLoading(false)
+      }
+
+      unsub = onAuthStateChanged(auth, (u) => {
+        if (cancelled) return
+        setUser(u)
+        setAuthLoading(false)
+        if (u) {
+          setAuthError('')
+          clearLegacyLocalData(u.uid)
+          setCloudReady(true)
+          setSyncError('')
+        } else {
+          setAllEvents([])
+          setCalendars([])
+          setCloudReady(!firebaseEnabled)
+          setSyncState('offline')
+          setSyncError('')
+        }
+      })
     }
 
-    const unsub = onAuthStateChanged(auth, (u) => {
-      if (cancelled) return
-      setUser(u)
-      setAuthLoading(false)
-      if (u) {
-        setAuthError('')
-        clearLegacyLocalData(u.uid)
-        setCloudReady(true)
-        setSyncError('')
-      } else {
-        setAllEvents([])
-        setCalendars([])
-        setCloudReady(!firebaseEnabled)
-        setSyncState('offline')
-        setSyncError('')
-      }
-    })
-
-    finishBootstrap()
+    initAuth()
 
     return () => {
       cancelled = true
