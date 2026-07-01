@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
+import { detectInAppBrowser } from '../lib/authSignIn.js'
 import { AppleIcon, GoogleIcon } from './icons.jsx'
 
 export default function AuthScreen() {
-  const { signInWithGoogle, signInWithApple, theme, toggleTheme } = useApp()
+  const { signInWithGoogle, signInWithApple, theme, toggleTheme, authError } = useApp()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const inAppBrowser = detectInAppBrowser()
+  const displayError = error || authError
 
   const run = async (fn) => {
     setError('')
@@ -25,6 +28,13 @@ export default function AuthScreen() {
       <div className="auth-card">
         <h1>Area Book</h1>
         <p className="auth-sub">Sign in to sync your calendar across devices.</p>
+
+        {inAppBrowser && (
+          <p className="auth-inapp-warning">
+            You&apos;re viewing this inside {inAppBrowser}. Apple Sign-In usually only works in Safari
+            or Chrome — use <strong>Open in Browser</strong> from the menu (⋯) if Apple sign-in fails.
+          </p>
+        )}
 
         <div className="auth-oauth">
           <button
@@ -47,7 +57,7 @@ export default function AuthScreen() {
           </button>
         </div>
 
-        {error && <p className="auth-error">{error}</p>}
+        {displayError && <p className="auth-error">{displayError}</p>}
         {busy && <p className="auth-busy">Signing in…</p>}
 
         <p className="auth-hint">

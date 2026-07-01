@@ -1,11 +1,22 @@
 export const GRID_START_HOUR = 7   // 7 AM
 export const GRID_END_HOUR = 22    // 10 PM
-export const ROW_H = 64            // px per hour — must match --row-h in index.css
+export const ROW_H = 56            // px per hour — must match --row-h in index.css
 export const SNAP_MINUTES = 15
+export const CREATE_SNAP_MINUTES = 30
 
 /** Round minutes since midnight to the nearest snap interval (default 15 min). */
 export function snapMinutes(minutes, step = SNAP_MINUTES) {
   return Math.round(minutes / step) * step
+}
+
+/** Snap down to the previous interval (e.g. 8:29 → 8:00 at 30 min). */
+export function snapMinutesFloor(minutes, step = SNAP_MINUTES) {
+  return Math.floor(minutes / step) * step
+}
+
+/** Snap up to the next interval (e.g. 8:01 → 8:30 at 30 min). */
+export function snapMinutesCeil(minutes, step = SNAP_MINUTES) {
+  return Math.ceil(minutes / step) * step
 }
 
 /** Snap to the hour row clicked (e.g. 9:45 → 9:00–10:00). */
@@ -78,11 +89,45 @@ export function gridHours() {
   return hours
 }
 
-export const WEEK_ROW_H = 28 // px per hour in week overview
+export const WEEK_ROW_H = 24 // px per hour in week overview at default day row height
+
+/** Week overview row height scaled from day-view hour height. */
+export function weekRowHeightFromDay(dayRowHeight) {
+  return Math.max(12, Math.round(dayRowHeight * (WEEK_ROW_H / ROW_H)))
+}
 
 const MONTHS_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 export function monthLabel(date) {
   return `${MONTHS_FULL[date.getMonth()]} ${date.getFullYear()}`
+}
+
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** e.g. "Jun 29 – Jul 5" or "Dec 28 – Jan 3, 2026" */
+export function weekRangeLabel(date) {
+  const week = weekDays(date)
+  const start = week[0]
+  const end = week[6]
+  const sm = MONTHS_SHORT[start.getMonth()]
+  const em = MONTHS_SHORT[end.getMonth()]
+  if (start.getFullYear() !== end.getFullYear()) {
+    return `${sm} ${start.getDate()}, ${start.getFullYear()} – ${em} ${end.getDate()}, ${end.getFullYear()}`
+  }
+  if (start.getMonth() === end.getMonth()) {
+    return `${sm} ${start.getDate()} – ${end.getDate()}`
+  }
+  return `${sm} ${start.getDate()} – ${em} ${end.getDate()}`
+}
+
+const WEEKDAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+/** e.g. "Today", "Tomorrow", "Wednesday, Jun 30" */
+export function dayNavLabel(date) {
+  const today = new Date()
+  const key = dateKey(date)
+  if (key === dateKey(today)) return 'Today'
+  if (key === dateKey(addDays(today, 1))) return 'Tomorrow'
+  return `${WEEKDAYS_FULL[date.getDay()]}, ${MONTHS_SHORT[date.getMonth()]} ${date.getDate()}`
 }
 
 /** 42-day grid (6 weeks) for a month picker, Sunday-first. */

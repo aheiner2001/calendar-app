@@ -1,10 +1,10 @@
-import { useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react'
+import { useMemo, useRef, useState, useEffect } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import AddEventModal from '../components/AddEventModal.jsx'
 import EventDetailModal from '../components/EventDetailModal.jsx'
 import EventCalendarTag from '../components/EventCalendarTag.jsx'
 import WeekCalendar from '../components/WeekCalendar.jsx'
-import { PlusIcon, RepeatIcon } from '../components/icons.jsx'
+import { PlusIcon, RepeatIcon, CaretLeftIcon, CaretRightIcon } from '../components/icons.jsx'
 import { layoutEvents } from '../lib/layout.js'
 import { eventsForDay } from '../lib/repeat.js'
 import { colorFill } from '../lib/settings.js'
@@ -14,14 +14,20 @@ import {
   GRID_START_HOUR,
   ROW_H,
   SNAP_MINUTES,
+  CREATE_SNAP_MINUTES,
+  addDays,
   dateKey,
   snapMinutes,
+  snapMinutesFloor,
+  snapMinutesCeil,
   snapToHourSlot,
   dowLabel,
   formatRange,
   gridHours,
   minutesToLabel,
   weekDays,
+  weekRangeLabel,
+  dayNavLabel,
 } from '../lib/time.js'
 
 const MIN_DURATION = 15
@@ -42,26 +48,13 @@ export default function Calendar() {
 
   const layerRef = useRef(null)
   const gridRef = useRef(null)
-  const [rowH, setRowH] = useState(ROW_H)
+  const rowH = settings.hourRowHeight ?? ROW_H
+  const minEventHeight = Math.max(12, Math.round(rowH * 0.32))
 
   const week = useMemo(() => weekDays(selectedDate), [selectedDate])
   const selectedKey = dateKey(selectedDate)
   const hours = gridHours()
   const snap = settings.snapMinutes || SNAP_MINUTES
-
-  useLayoutEffect(() => {
-    if (calendarView !== 'day') return
-    const measure = () => {
-      const row = gridRef.current?.querySelector('.time-row')
-      if (row) {
-        const h = row.getBoundingClientRect().height
-        if (h > 0) setRowH(h)
-      }
-    }
-    measure()
-    window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
-  }, [calendarView])
 
   useEffect(() => {
     if (moveId || resizeId || createDraft) {
@@ -107,7 +100,7 @@ export default function Calendar() {
   }
 
   const minutesToTop = (minutes) => ((minutes - GRID_START_HOUR * 60) / 60) * rowH
-  const minutesToHeight = (start, end) => Math.max(((end - start) / 60) * rowH, 22)
+  const minutesToHeight = (start, end) => Math.max(((end - start) / 60) * rowH, minEventHeight)
 
   const yToMinutesRaw = (clientY) => {
     if (!layerRef.current || rowH <= 0) return GRID_START_HOUR * 60
@@ -183,7 +176,7 @@ export default function Calendar() {
     if (!moved) {
       return { start: anchorStart, end: Math.min(anchorStart + defaultCreateDuration, maxEnd) }
     }
-    let end = snapMinutes(yToMinutesRaw(clientY), snap)
+    let end = snapMinutesCeil(yToMinutesRaw(clientY), CREATE_SNAP_MINUTES)
     if (end <= anchorStart) end = anchorStart + CREATE_MIN_DURATION
     if (end - anchorStart < CREATE_MIN_DURATION) end = anchorStart + CREATE_MIN_DURATION
     return { start: anchorStart, end: Math.min(end, maxEnd) }
@@ -194,7 +187,7 @@ export default function Calendar() {
 
     const gridEl = gridRef.current
     const startY = e.clientY
-    const anchorStart = snapMinutes(yToMinutesRaw(startY), snap)
+    const anchorStart = snapMinutesFloor(yToMinutesRaw(startY), CREATE_SNAP_MINUTES)
     const pressMs = e.pointerType === 'touch' ? LONG_PRESS_TOUCH_MS : LONG_PRESS_MS
 
     const session = {
@@ -482,6 +475,14 @@ export default function Calendar() {
     window.addEventListener('pointercancel', endDrag)
   }
 
+  const shiftWeek = (delta) => {
+    setSelectedDate(addDays(selectedDate, delta * 7))
+  }
+
+  const shiftDay = (delta) => {
+    setSelectedDate(addDays(selectedDate, delta))
+  }
+
   return (
     <div className="page">
       <div className="calendar-toolbar">
@@ -496,37 +497,79 @@ export default function Calendar() {
       </div>
 
       {calendarView === 'day' && (
-        <div className="week-strip">
-          {week.map((d) => {
-            const active = dateKey(d) === selectedKey
-            return (
-              <button
-                key={dateKey(d)}
-                className={`day-col${active ? ' active' : ''}`}
-                onClick={() => setSelectedDate(new Date(d))}
-              >
-                <div className="dow">{dowLabel(d)}</div>
-                <div className="dom">{d.getDate()}</div>
-              </button>
-            )
-          })}
-        </div>
+        <>
+          <div className="week-nav day-nav">
+            <button
+              type="button"
+              className="week-nav-btn"
+              onClick={() => shiftDay(-1)}
+              aria-label="Previous day"
+            >
+              <CaretLeftIcon />
+            </button>
+            <span className="week-nav-label">{dayNavLabel(selectedDate)}</span>
+            <button
+              type="button"
+              className="week-nav-btn"
+              onClick={() => shiftDay(1)}
+              aria-label="Next day"
+            >
+              <CaretRightIcon />
+            </button>
+          </div>
+          <div className="week-strip">
+            {week.map((d) => {
+              const active = dateKey(d) === selectedKey
+              return (
+                <button
+                  key={dateKey(d)}
+                  className={`day-col${active ? ' active' : ''}`}
+                  onClick={() => setSelectedDate(new Date(d))}
+                >
+                  <div className="dow">{dowLabel(d)}</div>
+                  <div className="dom">{d.getDate()}</div>
+                </button>
+              )
+            })}
+          </div>
+        </>
       )}
 
       {calendarView === 'week' ? (
-        <WeekCalendar
-          events={events}
-          week={week}
-          selectedDate={selectedDate}
-          calendars={calendars}
-          activeCalendarId={activeCalendarId}
-          personalCalendarId={personalCalendarId}
-          onSelectDay={(day) => {
-            setSelectedDate(new Date(day))
-            setCalendarView('day')
-          }}
-          onEventClick={openDetail}
-        />
+        <>
+          <div className="week-nav">
+            <button
+              type="button"
+              className="week-nav-btn"
+              onClick={() => shiftWeek(-1)}
+              aria-label="Previous week"
+            >
+              <CaretLeftIcon />
+            </button>
+            <span className="week-nav-label">{weekRangeLabel(selectedDate)}</span>
+            <button
+              type="button"
+              className="week-nav-btn"
+              onClick={() => shiftWeek(1)}
+              aria-label="Next week"
+            >
+              <CaretRightIcon />
+            </button>
+          </div>
+          <WeekCalendar
+            events={events}
+            week={week}
+            selectedDate={selectedDate}
+            calendars={calendars}
+            activeCalendarId={activeCalendarId}
+            personalCalendarId={personalCalendarId}
+            onSelectDay={(day) => {
+              setSelectedDate(new Date(day))
+              setCalendarView('day')
+            }}
+            onEventClick={openDetail}
+          />
+        </>
       ) : (
       <div className={`grid-wrap${moveId || resizeId || createDraft ? ' calendar-dragging' : ''}`} ref={gridRef}>
         <div className="grid-inner">

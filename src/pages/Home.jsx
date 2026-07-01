@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext.jsx'
 import AddEventModal from '../components/AddEventModal.jsx'
 import EventCalendarTag from '../components/EventCalendarTag.jsx'
@@ -24,8 +25,15 @@ function formatDayHeader(date, today) {
 }
 
 export default function Home() {
-  const { events, showToast, calendars, activeCalendarId, personalCalendarId } = useApp()
+  const { events, showToast, calendars, activeCalendarId, personalCalendarId, setSelectedDate, setCalendarView } = useApp()
+  const navigate = useNavigate()
   const [addOpen, setAddOpen] = useState(false)
+
+  const goToEventDay = (date) => {
+    setSelectedDate(new Date(date))
+    setCalendarView('day')
+    navigate('/calendar')
+  }
 
   const today = useMemo(() => new Date(), [])
   const todayKey = dateKey(today)
@@ -77,7 +85,11 @@ export default function Home() {
                   {showDay && (
                     <div className="home-upcoming-day">{formatDayHeader(date, today)}</div>
                   )}
-                  <div className={`home-event-item${isNext ? ' home-event-item-next' : ''}`}>
+                  <button
+                    type="button"
+                    className={`home-event-item${isNext ? ' home-event-item-next' : ''}`}
+                    onClick={() => goToEventDay(date)}
+                  >
                     <div className="home-event-dot" style={{ background: ev.color }} />
                     <div className="etext">
                       {isNext && <div className="home-next-label">Next</div>}
@@ -90,7 +102,7 @@ export default function Home() {
                         personalCalendarId={personalCalendarId}
                       />
                     </div>
-                  </div>
+                  </button>
                 </Fragment>
               )
             })

@@ -81,6 +81,7 @@ export function AppProvider({ children }) {
   )
   const [user, setUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(firebaseEnabled)
+  const [authError, setAuthError] = useState('')
   const [syncState, setSyncState] = useState(firebaseEnabled ? 'syncing' : 'local')
   const [cloudReady, setCloudReady] = useState(!firebaseEnabled)
   const [syncError, setSyncError] = useState('')
@@ -125,6 +126,14 @@ export function AppProvider({ children }) {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
   }, [settings])
 
+  useEffect(() => {
+    document.documentElement.style.setProperty('--row-h', `${settings.hourRowHeight}px`)
+  }, [settings.hourRowHeight])
+
+  const updateSetting = useCallback((key, value) => {
+    setSettings((s) => ({ ...s, [key]: value }))
+  }, [])
+
   const addColor = useCallback(() => {
     const id = `c-${Date.now()}`
     setSettings((s) => ({
@@ -154,15 +163,18 @@ export function AppProvider({ children }) {
     let cancelled = false
 
     completeRedirectSignIn(auth)
-      .then((result) => {
-        if (result?.user && !cancelled) {
-          setSyncError('')
+      .then((outcome) => {
+        if (cancelled) return
+        if (outcome.ok) {
+          setAuthError('')
+          return
         }
+        if (outcome.message) setAuthError(outcome.message)
       })
       .catch((err) => {
         if (!cancelled) {
           console.error('Redirect sign-in error:', err)
-          setSyncError(err.message || 'Sign-in failed after redirect')
+          setAuthError(err.message || 'Sign-in failed after redirect')
         }
       })
 
@@ -171,6 +183,7 @@ export function AppProvider({ children }) {
       setUser(u)
       setAuthLoading(false)
       if (u) {
+        setAuthError('')
         clearLegacyLocalData(u.uid)
         setCloudReady(true)
         setSyncError('')
@@ -190,14 +203,16 @@ export function AppProvider({ children }) {
   }, [])
 
   const signInWithGoogle = useCallback(async () => {
-    return signInWithOAuth(auth, new GoogleAuthProvider())
+    setAuthError('')
+    return signInWithOAuth(auth, new GoogleAuthProvider(), 'google')
   }, [])
 
   const signInWithApple = useCallback(async () => {
+    setAuthError('')
     const provider = new OAuthProvider('apple.com')
     provider.addScope('email')
     provider.addScope('name')
-    return signInWithOAuth(auth, provider)
+    return signInWithOAuth(auth, provider, 'apple')
   }, [])
 
   const signOut = useCallback(async () => {
@@ -886,6 +901,7 @@ export function AppProvider({ children }) {
       setCalendarView,
       toggleCalendarView,
       settings,
+      updateSetting,
       addColor,
       updateColor,
       deleteColor,
@@ -907,6 +923,7 @@ export function AppProvider({ children }) {
       ensureCalendarShareCode,
       user,
       authLoading,
+      authError,
       signInWithGoogle,
       signInWithApple,
       signOut,
@@ -926,6 +943,7 @@ export function AppProvider({ children }) {
       calendarView,
       toggleCalendarView,
       settings,
+      updateSetting,
       addColor,
       updateColor,
       deleteColor,
@@ -946,6 +964,7 @@ export function AppProvider({ children }) {
       ensureCalendarShareCode,
       user,
       authLoading,
+      authError,
       signInWithGoogle,
       signInWithApple,
       signOut,

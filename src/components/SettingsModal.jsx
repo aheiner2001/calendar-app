@@ -2,10 +2,23 @@ import { useEffect, useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import { ALL_CALENDARS_ID } from '../lib/calendars.js'
 import { useInviteQr } from '../lib/qr.js'
+import {
+  clampHourRowHeight,
+  HOUR_ROW_HEIGHT_MAX,
+  HOUR_ROW_HEIGHT_MIN,
+} from '../lib/settings.js'
 
 export default function SettingsModal({ onClose }) {
-  const { settings, addColor, updateColor, deleteColor, activeCalendarId, calendars, ensureCalendarShareCode } =
-    useApp()
+  const {
+    settings,
+    updateSetting,
+    addColor,
+    updateColor,
+    deleteColor,
+    activeCalendarId,
+    calendars,
+    ensureCalendarShareCode,
+  } = useApp()
   const [share, setShare] = useState(null)
   const [shareLoading, setShareLoading] = useState(false)
 
@@ -69,6 +82,27 @@ export default function SettingsModal({ onClose }) {
             )}
           </div>
         )}
+
+        <h4 className="settings-section-title">Calendar height</h4>
+        <p className="settings-hint">
+          Hour row size in day and week view. Compact fits more of your schedule on screen; expanded
+          makes events easier to read and drag.
+        </p>
+        <div className="settings-range-row">
+          <span className="settings-range-end">Compact</span>
+          <input
+            type="range"
+            className="settings-range"
+            min={HOUR_ROW_HEIGHT_MIN}
+            max={HOUR_ROW_HEIGHT_MAX}
+            step={4}
+            value={settings.hourRowHeight}
+            onChange={(e) => updateSetting('hourRowHeight', clampHourRowHeight(e.target.value))}
+            aria-label="Calendar hour row height"
+          />
+          <span className="settings-range-end">Expanded</span>
+        </div>
+        <p className="settings-range-value">{settings.hourRowHeight}px per hour</p>
 
         <h4 className="settings-section-title">Quick add presets</h4>
         <p className="settings-hint">

@@ -7,7 +7,7 @@ export function migrate(event, uid) {
   let e = event
   if (!event.color) e = { ...e, color: CATEGORY_TO_COLOR[event.category] || '#8b6fc9' }
   const repeat = normalizeRepeat(e.repeat)
-  if (repeat !== e.repeat) e = { ...e, repeat }
+  if (JSON.stringify(repeat) !== JSON.stringify(e.repeat)) e = { ...e, repeat }
   if (!e.calendarId && uid) e = { ...e, calendarId: personalCalendarId(uid) }
   return e
 }

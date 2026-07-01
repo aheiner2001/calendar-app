@@ -1,15 +1,16 @@
 import { useMemo } from 'react'
+import { useApp } from '../context/AppContext.jsx'
 import { layoutEvents } from '../lib/layout.js'
 import { eventsForDay } from '../lib/repeat.js'
 import { ALL_CALENDARS_ID, calendarLabel } from '../lib/calendars.js'
 import { colorFill } from '../lib/settings.js'
 import {
   GRID_START_HOUR,
-  WEEK_ROW_H,
   dateKey,
   dowLabel,
   gridHours,
   minutesToLabel,
+  weekRowHeightFromDay,
 } from '../lib/time.js'
 
 export default function WeekCalendar({
@@ -22,9 +23,11 @@ export default function WeekCalendar({
   onSelectDay,
   onEventClick,
 }) {
+  const { settings } = useApp()
   const showCalendarNames = activeCalendarId === ALL_CALENDARS_ID
   const hours = gridHours()
-  const gridHeight = hours.length * WEEK_ROW_H
+  const weekRowH = weekRowHeightFromDay(settings.hourRowHeight)
+  const gridHeight = hours.length * weekRowH
   const selectedKey = dateKey(selectedDate)
 
   const eventsByDay = useMemo(() => {
@@ -36,8 +39,8 @@ export default function WeekCalendar({
     return map
   }, [events, week])
 
-  const minutesToTop = (minutes) => ((minutes - GRID_START_HOUR * 60) / 60) * WEEK_ROW_H
-  const minutesToHeight = (start, end) => Math.max(((end - start) / 60) * WEEK_ROW_H, 4)
+  const minutesToTop = (minutes) => ((minutes - GRID_START_HOUR * 60) / 60) * weekRowH
+  const minutesToHeight = (start, end) => Math.max(((end - start) / 60) * weekRowH, Math.max(4, Math.round(weekRowH * 0.17)))
 
   return (
     <div className="week-grid-wrap">
@@ -45,7 +48,7 @@ export default function WeekCalendar({
         <div className="week-time-col">
           <div className="week-col-header week-time-header" />
           {hours.map((h, i) => (
-            <div key={h} className="week-time-label" style={{ height: WEEK_ROW_H }}>
+            <div key={h} className="week-time-label" style={{ height: weekRowH }}>
               {i % 2 === 0 ? minutesToLabel(h * 60).replace(':00', '') : ''}
             </div>
           ))}
@@ -65,7 +68,7 @@ export default function WeekCalendar({
 
               <div className="week-day-grid" style={{ height: gridHeight }}>
                 {hours.map((h) => (
-                  <div key={h} className="week-hour-line" style={{ height: WEEK_ROW_H }} />
+                  <div key={h} className="week-hour-line" style={{ height: weekRowH }} />
                 ))}
 
                 {dayEvents.map((ev) => {

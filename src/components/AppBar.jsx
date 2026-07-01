@@ -5,16 +5,18 @@ import { CaretDownIcon, SettingsIcon } from './icons.jsx'
 import CalendarPicker from './CalendarPicker.jsx'
 import DatePickerModal from './DatePickerModal.jsx'
 import SettingsModal from './SettingsModal.jsx'
+import { dateKey } from '../lib/time.js'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 export default function AppBar() {
-  const { selectedDate, theme, toggleTheme, calendarView, toggleCalendarView } = useApp()
+  const { selectedDate, setSelectedDate, theme, toggleTheme, calendarView, toggleCalendarView } = useApp()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [datePickerOpen, setDatePickerOpen] = useState(false)
   const location = useLocation()
   const onCalendar = location.pathname === '/calendar'
   const label = `${MONTHS[selectedDate.getMonth()]} ${selectedDate.getDate()}`
+  const onToday = dateKey(selectedDate) === dateKey(new Date())
 
   return (
     <div className="app-bar">
@@ -30,6 +32,17 @@ export default function AppBar() {
       </div>
 
       <div className="app-bar-right">
+        {onCalendar && (
+          <button
+            type="button"
+            className={`today-btn${onToday ? ' today-btn-active' : ''}`}
+            onClick={() => setSelectedDate(new Date())}
+            aria-label="Go to today"
+            disabled={onToday}
+          >
+            Today
+          </button>
+        )}
         {onCalendar && (
           <button
             type="button"
