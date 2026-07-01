@@ -3,7 +3,6 @@ import {
   GoogleAuthProvider,
   OAuthProvider,
   onAuthStateChanged,
-  signInWithPopup,
   signOut as firebaseSignOut,
 } from 'firebase/auth'
 import {
@@ -23,6 +22,7 @@ import {
   where,
 } from 'firebase/firestore'
 import { auth, db, firebaseEnabled } from '../lib/firebase.js'
+import { completeRedirectSignIn, signInWithOAuth } from '../lib/authSignIn.js'
 import { DEFAULT_SETTINGS, normalizeSettings } from '../lib/settings.js'
 import {
   ALL_CALENDARS_ID,
@@ -150,7 +150,24 @@ export function AppProvider({ children }) {
       setAuthLoading(false)
       return
     }
-    return onAuthStateChanged(auth, (u) => {
+
+    let cancelled = false
+
+    completeRedirectSignIn(auth)
+      .then((result) => {
+        if (result?.user && !cancelled) {
+          setSyncError('')
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('Redirect sign-in error:', err)
+          setSyncError(err.message || 'Sign-in failed after redirect')
+        }
+      })
+
+    const unsub = onAuthStateChanged(auth, (u) => {
+      if (cancelled) return
       setUser(u)
       setAuthLoading(false)
       if (u) {
@@ -165,17 +182,22 @@ export function AppProvider({ children }) {
         setSyncError('')
       }
     })
+
+    return () => {
+      cancelled = true
+      unsub()
+    }
   }, [])
 
   const signInWithGoogle = useCallback(async () => {
-    await signInWithPopup(auth, new GoogleAuthProvider())
+    return signInWithOAuth(auth, new GoogleAuthProvider())
   }, [])
 
   const signInWithApple = useCallback(async () => {
     const provider = new OAuthProvider('apple.com')
     provider.addScope('email')
     provider.addScope('name')
-    await signInWithPopup(auth, provider)
+    return signInWithOAuth(auth, provider)
   }, [])
 
   const signOut = useCallback(async () => {

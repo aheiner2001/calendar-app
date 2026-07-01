@@ -1,12 +1,14 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
 import AddEventModal from '../components/AddEventModal.jsx'
 import EventCalendarTag from '../components/EventCalendarTag.jsx'
 import { eventsForDay } from '../lib/repeat.js'
-import { dateKey, formatRange } from '../lib/time.js'
+import { addDays, dateKey, formatRange } from '../lib/time.js'
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MONTHS_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const UPCOMING_DAYS = 14
 
 function greeting(h) {
   if (h < 12) return 'Good morning'
@@ -14,79 +16,97 @@ function greeting(h) {
   return 'Good evening'
 }
 
+function formatDayHeader(date, today) {
+  const key = dateKey(date)
+  if (key === dateKey(today)) return 'Today'
+  if (key === dateKey(addDays(today, 1))) return 'Tomorrow'
+  return `${WEEKDAYS[date.getDay()]}, ${MONTHS[date.getMonth()]} ${date.getDate()}`
+}
+
 export default function Home() {
   const { events, showToast, calendars, activeCalendarId, personalCalendarId } = useApp()
   const [addOpen, setAddOpen] = useState(false)
 
-  const today = new Date()
+  const today = useMemo(() => new Date(), [])
   const todayKey = dateKey(today)
   const nowMinutes = today.getHours() * 60 + today.getMinutes()
 
-  const todays = useMemo(
-    () => eventsForDay(events, today).sort((a, b) => a.start - b.start),
-    [events, todayKey],
-  )
+  const upcoming = useMemo(() => {
+    const items = []
+    const dayStart = new Date(today)
+    dayStart.setHours(0, 0, 0, 0)
 
-  const upNext = useMemo(() => todays.filter((e) => e.end >= nowMinutes), [todays, nowMinutes])
+    for (let i = 0; i < UPCOMING_DAYS; i++) {
+      const date = addDays(dayStart, i)
+      const dayEvents = eventsForDay(events, date).sort((a, b) => a.start - b.start)
+      for (const ev of dayEvents) {
+        if (i === 0 && ev.end < nowMinutes) continue
+        items.push({
+          ev,
+          date,
+          key: `${ev.id}@${dateKey(date)}`,
+        })
+      }
+    }
 
-  const nextEvent = upNext[0]
+    return items
+  }, [events, todayKey, nowMinutes, today])
 
   return (
     <div className="page">
       <div className="home-page">
-        <div className="home-greeting">{greeting(today.getHours())} </div>
-        <div className="home-sub">
-          {WEEKDAYS[today.getDay()]}, {MONTHS[today.getMonth()]} {today.getDate()}
+        <div className="home-header">
+          <div className="home-greeting">{greeting(today.getHours())}</div>
+          <div className="home-sub">
+            {WEEKDAYS[today.getDay()]}, {MONTHS_FULL[today.getMonth()]} {today.getDate()}
+          </div>
         </div>
 
-        <div className="home-section-title">Up next</div>
-        {nextEvent ? (
-          <div className="home-next-card">
-            <div className="home-event-dot" style={{ background: nextEvent.color }} />
+        <div className="home-section-title">Up next · 2 weeks</div>
+        <div className="home-upcoming-box">
+          {upcoming.length === 0 ? (
+            <div className="home-empty">No upcoming events in the next two weeks</div>
+          ) : (
+            upcoming.map(({ ev, date, key }, index) => {
+              const showDay =
+                index === 0 || dateKey(date) !== dateKey(upcoming[index - 1].date)
+              const isNext = index === 0
+
+              return (
+                <Fragment key={key}>
+                  {showDay && (
+                    <div className="home-upcoming-day">{formatDayHeader(date, today)}</div>
+                  )}
+                  <div className={`home-event-item${isNext ? ' home-event-item-next' : ''}`}>
+                    <div className="home-event-dot" style={{ background: ev.color }} />
+                    <div className="etext">
+                      {isNext && <div className="home-next-label">Next</div>}
+                      <div className="etitle">{ev.title}</div>
+                      <div className="etime">{formatRange(ev.start, ev.end)}</div>
+                      <EventCalendarTag
+                        event={ev}
+                        calendars={calendars}
+                        activeCalendarId={activeCalendarId}
+                        personalCalendarId={personalCalendarId}
+                      />
+                    </div>
+                  </div>
+                </Fragment>
+              )
+            })
+          )}
+        </div>
+
+        <div className="home-footer">
+          <div className="home-section-title">Quick actions</div>
+          <button type="button" className="home-action-item" onClick={() => setAddOpen(true)}>
+            <div className="home-action-icon">+</div>
             <div className="etext">
-              <div className="home-next-label">Next</div>
-              <div className="etitle">{nextEvent.title}</div>
-              <div className="etime">{formatRange(nextEvent.start, nextEvent.end)}</div>
-              <EventCalendarTag
-                event={nextEvent}
-                calendars={calendars}
-                activeCalendarId={activeCalendarId}
-                personalCalendarId={personalCalendarId}
-              />
+              <div className="etitle">Add event</div>
+              <div className="etime">Create a new event for today</div>
             </div>
-          </div>
-        ) : (
-          <div className="home-empty">Nothing left today 🎉</div>
-        )}
-
-        {upNext.length > 1 && (
-          <div className="home-upcoming-list">
-            {upNext.slice(1).map((ev) => (
-              <div key={ev.id} className="home-event-item">
-                <div className="home-event-dot" style={{ background: ev.color }} />
-                <div className="etext">
-                  <div className="etitle">{ev.title}</div>
-                  <div className="etime">{formatRange(ev.start, ev.end)}</div>
-                  <EventCalendarTag
-                    event={ev}
-                    calendars={calendars}
-                    activeCalendarId={activeCalendarId}
-                    personalCalendarId={personalCalendarId}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="home-section-title home-section-spaced">Quick actions</div>
-        <button type="button" className="home-action-item" onClick={() => setAddOpen(true)}>
-          <div className="home-action-icon">+</div>
-          <div className="etext">
-            <div className="etitle">Add event</div>
-            <div className="etime">Create a new event for today</div>
-          </div>
-        </button>
+          </button>
+        </div>
       </div>
 
       {addOpen && (

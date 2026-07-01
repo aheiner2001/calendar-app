@@ -11,10 +11,11 @@ export default function AuthScreen() {
     setError('')
     setBusy(true)
     try {
-      await fn()
+      const mode = await fn()
+      if (mode === 'redirect') return
+      setBusy(false)
     } catch (err) {
       setError(friendlyError(err))
-    } finally {
       setBusy(false)
     }
   }
@@ -22,7 +23,7 @@ export default function AuthScreen() {
   return (
     <div className="auth-screen">
       <div className="auth-card">
-        <h1>Area Book</h1>
+        <h1>Calendar</h1>
         <p className="auth-sub">Sign in to sync your calendar across devices.</p>
 
         <div className="auth-oauth">
@@ -49,6 +50,11 @@ export default function AuthScreen() {
         {error && <p className="auth-error">{error}</p>}
         {busy && <p className="auth-busy">Signing in…</p>}
 
+        <p className="auth-hint">
+          On phones and Safari, sign-in opens in the same tab. If a popup is blocked, try again
+          and we&apos;ll redirect automatically.
+        </p>
+
         <button className="theme-toggle auth-theme" onClick={toggleTheme} aria-label="Toggle theme">
           <div className="knob">{theme === 'dark' ? '☀' : '🌙'}</div>
         </button>
@@ -59,14 +65,26 @@ export default function AuthScreen() {
 
 function friendlyError(err) {
   const code = err?.code || ''
-  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+  if (code === 'auth/popup-closed-by-user') {
     return 'Sign-in was cancelled.'
   }
+  if (code === 'auth/popup-blocked') {
+    return 'Your browser blocked the sign-in popup. Try again — we will use a full-page redirect instead.'
+  }
+  if (code === 'auth/cancelled-popup-request') {
+    return 'Sign-in was interrupted. Wait a moment and try again.'
+  }
   if (code === 'auth/account-exists-with-different-credential') {
-    return 'An account already exists with this email using a different sign-in method.'
+    return 'An account already exists with this email using a different sign-in method. Try Google if you used Apple before, or vice versa.'
   }
   if (code === 'auth/operation-not-allowed') {
     return 'This sign-in method is not enabled in Firebase yet.'
+  }
+  if (code === 'auth/unauthorized-domain') {
+    return 'This site is not authorized in Firebase. Add your domain under Authentication → Settings → Authorized domains.'
+  }
+  if (code === 'auth/invalid-credential' || code === 'auth/invalid-oauth-provider') {
+    return 'Apple sign-in could not complete. Confirm Apple is enabled in Firebase and your Return URL is set in Apple Developer.'
   }
   return err?.message || 'Something went wrong. Try again.'
 }
