@@ -23,7 +23,7 @@ export default function AuthScreen() {
   return (
     <div className="auth-screen">
       <div className="auth-card">
-        <h1>Calendar</h1>
+        <h1>Area Book</h1>
         <p className="auth-sub">Sign in to sync your calendar across devices.</p>
 
         <div className="auth-oauth">
@@ -51,8 +51,7 @@ export default function AuthScreen() {
         {busy && <p className="auth-busy">Signing in…</p>}
 
         <p className="auth-hint">
-          On phones and Safari, sign-in opens in the same tab. If a popup is blocked, try again
-          and we&apos;ll redirect automatically.
+          You&apos;ll be sent to Google or Apple to sign in, then returned here automatically.
         </p>
 
         <button className="theme-toggle auth-theme" onClick={toggleTheme} aria-label="Toggle theme">
@@ -65,11 +64,12 @@ export default function AuthScreen() {
 
 function friendlyError(err) {
   const code = err?.code || ''
+  const message = err?.message || ''
   if (code === 'auth/popup-closed-by-user') {
     return 'Sign-in was cancelled.'
   }
-  if (code === 'auth/popup-blocked') {
-    return 'Your browser blocked the sign-in popup. Try again — we will use a full-page redirect instead.'
+  if (code === 'auth/popup-blocked' || message.includes('popup-blocked')) {
+    return 'Sign-in was blocked. Refresh the page and try again.'
   }
   if (code === 'auth/cancelled-popup-request') {
     return 'Sign-in was interrupted. Wait a moment and try again.'
