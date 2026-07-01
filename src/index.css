@@ -1410,8 +1410,8 @@ body.light .auth-oauth-apple{ background:#000; color:#fff; border-color:#000; }
 .auth-inapp-warning{
   font-size:12px;
   color:var(--text-dim);
-  background:var(--surface2);
-  border:1px solid var(--border);
+  background:var(--bg-card);
+  border:1px solid var(--line);
   border-radius:10px;
   padding:10px 12px;
   margin:0 0 16px;
@@ -1419,6 +1419,78 @@ body.light .auth-oauth-apple{ background:#000; color:#fff; border-color:#000; }
   text-align:left;
 }
 .auth-inapp-warning strong{ color:var(--text); font-weight:600; }
+.auth-inapp-panel{ margin-bottom:16px; }
+.auth-inapp-actions{
+  display:flex;
+  gap:8px;
+  margin-top:10px;
+}
+.auth-action-btn{
+  flex:1;
+  padding:10px 12px;
+  border-radius:10px;
+  border:1px solid var(--accent);
+  background:var(--accent);
+  color:#fff;
+  font-size:13px;
+  font-weight:600;
+  font-family:inherit;
+  cursor:pointer;
+}
+.auth-action-btn:disabled{ opacity:.55; cursor:default; }
+.auth-action-secondary{
+  background:var(--bg-card);
+  color:var(--text);
+  border-color:var(--line);
+}
+.auth-email-block{
+  margin-bottom:16px;
+  padding:12px;
+  border-radius:10px;
+  background:var(--bg-card);
+  border:1px solid var(--line);
+}
+.auth-email-optional{
+  background:transparent;
+  border:none;
+  padding:0;
+}
+.auth-email-label{
+  display:block;
+  font-size:12px;
+  font-weight:600;
+  text-transform:uppercase;
+  letter-spacing:.4px;
+  color:var(--text-dim);
+  margin-bottom:8px;
+}
+.auth-email-input{
+  width:100%;
+  box-sizing:border-box;
+  padding:10px 12px;
+  border-radius:10px;
+  border:1px solid var(--line);
+  background:var(--bg);
+  color:var(--text);
+  font-size:15px;
+  font-family:inherit;
+  margin-bottom:8px;
+}
+.auth-email-submit{ width:100%; }
+.auth-email-sent{
+  font-size:13px;
+  color:var(--text-dim);
+  line-height:1.5;
+  margin:0;
+}
+.auth-email-sent strong{ color:var(--text); }
+.auth-oauth-muted{ opacity:.85; }
+.auth-oauth-note{
+  font-size:11px;
+  color:var(--text-dim);
+  text-align:center;
+  margin:0 0 6px;
+}
 .auth-error{ color:#e0457f; font-size:13px; margin-top:14px; text-align:center; }
 .auth-hint{
   font-size:12px;

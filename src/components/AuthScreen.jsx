@@ -1,14 +1,39 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useApp } from '../context/AppContext.jsx'
-import { detectInAppBrowser } from '../lib/authSignIn.js'
+import { auth } from '../lib/firebase.js'
+import {
+  copyAppUrl,
+  detectBraveBrowser,
+  detectInAppBrowser,
+  isEmailLinkSignIn,
+  openInExternalBrowser,
+  peekAuthPending,
+} from '../lib/authSignIn.js'
 import { AppleIcon, GoogleIcon } from './icons.jsx'
 
 export default function AuthScreen() {
-  const { signInWithGoogle, signInWithApple, theme, toggleTheme, authError } = useApp()
+  const {
+    signInWithGoogle,
+    signInWithApple,
+    sendSignInEmail,
+    completeEmailLink,
+    theme,
+    toggleTheme,
+    authError,
+  } = useApp()
   const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState(() => Boolean(peekAuthPending()))
+  const [email, setEmail] = useState('')
+  const [emailSent, setEmailSent] = useState(false)
+  const [copied, setCopied] = useState(false)
   const inAppBrowser = detectInAppBrowser()
+  const braveBrowser = detectBraveBrowser()
+  const emailLinkPending = isEmailLinkSignIn(auth)
   const displayError = error || authError
+
+  useEffect(() => {
+    if (!peekAuthPending()) setBusy(false)
+  }, [authError])
 
   const run = async (fn) => {
     setError('')
@@ -23,6 +48,41 @@ export default function AuthScreen() {
     }
   }
 
+  const handleSendEmail = async () => {
+    setError('')
+    setBusy(true)
+    try {
+      await sendSignInEmail(email)
+      setEmailSent(true)
+    } catch (err) {
+      setError(friendlyError(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleFinishEmailLink = async () => {
+    setError('')
+    setBusy(true)
+    try {
+      const outcome = await completeEmailLink(email)
+      if (!outcome.ok) setBusy(false)
+    } catch (err) {
+      setError(friendlyError(err))
+      setBusy(false)
+    }
+  }
+
+  const handleCopyLink = async () => {
+    try {
+      await copyAppUrl()
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2500)
+    } catch {
+      setError('Could not copy link. Long-press the address bar and copy the URL manually.')
+    }
+  }
+
   return (
     <div className="auth-screen">
       <div className="auth-card">
@@ -30,13 +90,104 @@ export default function AuthScreen() {
         <p className="auth-sub">Sign in to sync your calendar across devices.</p>
 
         {inAppBrowser && (
+          <div className="auth-inapp-panel">
+            <p className="auth-inapp-warning">
+              You&apos;re in <strong>{inAppBrowser}</strong>. Google and Apple sign-in usually fail
+              here. Use one of these options instead:
+            </p>
+            <div className="auth-inapp-actions">
+              <button type="button" className="auth-action-btn" onClick={() => openInExternalBrowser()}>
+                Open in browser
+              </button>
+              <button type="button" className="auth-action-btn auth-action-secondary" onClick={handleCopyLink}>
+                {copied ? 'Link copied!' : 'Copy app link'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {braveBrowser && !inAppBrowser && (
           <p className="auth-inapp-warning">
-            You&apos;re viewing this inside {inAppBrowser}. Apple Sign-In usually only works in Safari
-            or Chrome — use <strong>Open in Browser</strong> from the menu (⋯) if Apple sign-in fails.
+            Brave can block Google/Apple sign-in. If sign-in fails, try Safari or Chrome, or allow
+            cross-site cookies for this site in Brave&apos;s settings.
           </p>
         )}
 
-        <div className="auth-oauth">
+        {(inAppBrowser || emailLinkPending) && (
+          <div className="auth-email-block">
+            <label className="auth-email-label" htmlFor="auth-email">
+              {emailLinkPending
+                ? 'Confirm your email to finish signing in'
+                : emailSent
+                  ? 'Check your email'
+                  : 'Sign in with email link'}
+            </label>
+            {emailSent && !emailLinkPending ? (
+              <p className="auth-email-sent">
+                We sent a link to <strong>{email}</strong>. Open it from your email app (works even if
+                you started in {inAppBrowser || 'an in-app browser'}).
+              </p>
+            ) : (
+              <>
+                <input
+                  id="auth-email"
+                  type="email"
+                  className="auth-email-input"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  disabled={busy}
+                />
+                <button
+                  type="button"
+                  className="auth-action-btn auth-email-submit"
+                  disabled={busy || !email.trim()}
+                  onClick={emailLinkPending ? handleFinishEmailLink : handleSendEmail}
+                >
+                  {emailLinkPending ? 'Finish sign-in' : 'Email me a sign-in link'}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {!inAppBrowser && !emailLinkPending && (
+          <div className="auth-email-block auth-email-optional">
+            <label className="auth-email-label" htmlFor="auth-email-opt">
+              Or sign in with email
+            </label>
+            {emailSent ? (
+              <p className="auth-email-sent">
+                Check your inbox at <strong>{email}</strong> and tap the sign-in link.
+              </p>
+            ) : (
+              <>
+                <input
+                  id="auth-email-opt"
+                  type="email"
+                  className="auth-email-input"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  disabled={busy}
+                />
+                <button
+                  type="button"
+                  className="auth-action-btn auth-action-secondary auth-email-submit"
+                  disabled={busy || !email.trim()}
+                  onClick={handleSendEmail}
+                >
+                  Email me a sign-in link
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        <div className={`auth-oauth${inAppBrowser ? ' auth-oauth-muted' : ''}`}>
+          {inAppBrowser && <p className="auth-oauth-note">Google / Apple (may not work here)</p>}
           <button
             type="button"
             className="auth-oauth-btn"
@@ -61,7 +212,9 @@ export default function AuthScreen() {
         {busy && <p className="auth-busy">Signing in…</p>}
 
         <p className="auth-hint">
-          You&apos;ll be sent to Google or Apple to sign in, then returned here automatically.
+          {inAppBrowser
+            ? 'Email links open in your mail app and usually work when Google/Apple do not.'
+            : "You'll be sent to Google or Apple to sign in, then returned here automatically."}
         </p>
 
         <button className="theme-toggle auth-theme" onClick={toggleTheme} aria-label="Toggle theme">
@@ -88,13 +241,16 @@ function friendlyError(err) {
     return 'An account already exists with this email using a different sign-in method. Try Google if you used Apple before, or vice versa.'
   }
   if (code === 'auth/operation-not-allowed') {
-    return 'This sign-in method is not enabled in Firebase yet.'
+    return 'Email sign-in is not enabled yet. Enable Email link in Firebase Authentication, or use Google/Apple in Safari or Chrome.'
   }
   if (code === 'auth/unauthorized-domain') {
     return 'This site is not authorized in Firebase. Add your domain under Authentication → Settings → Authorized domains.'
   }
   if (code === 'auth/invalid-credential' || code === 'auth/invalid-oauth-provider') {
     return 'Apple sign-in could not complete. Confirm Apple is enabled in Firebase and your Return URL is set in Apple Developer.'
+  }
+  if (code === 'auth/invalid-email') {
+    return 'That email address looks invalid.'
   }
   return err?.message || 'Something went wrong. Try again.'
 }

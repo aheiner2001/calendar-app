@@ -22,7 +22,7 @@ import {
   where,
 } from 'firebase/firestore'
 import { auth, db, firebaseEnabled } from '../lib/firebase.js'
-import { completeRedirectSignIn, signInWithOAuth } from '../lib/authSignIn.js'
+import { completeRedirectSignIn, finishEmailLinkSignIn, sendEmailSignInLink, signInWithOAuth } from '../lib/authSignIn.js'
 import { DEFAULT_SETTINGS, normalizeSettings } from '../lib/settings.js'
 import {
   ALL_CALENDARS_ID,
@@ -161,22 +161,34 @@ export function AppProvider({ children }) {
     }
 
     let cancelled = false
+    setAuthLoading(true)
 
-    completeRedirectSignIn(auth)
-      .then((outcome) => {
+    const finishBootstrap = async () => {
+      try {
+        const outcome = await completeRedirectSignIn(auth)
         if (cancelled) return
-        if (outcome.ok) {
+
+        await auth.authStateReady()
+        if (auth.currentUser) {
           setAuthError('')
           return
         }
-        if (outcome.message) setAuthError(outcome.message)
-      })
-      .catch((err) => {
+
+        if (!outcome.ok && outcome.needsEmail) {
+          setAuthError(outcome.message || 'Confirm your email to finish signing in.')
+          return
+        }
+
+        if (!outcome.ok && outcome.message) {
+          setAuthError(outcome.message)
+        }
+      } catch (err) {
         if (!cancelled) {
           console.error('Redirect sign-in error:', err)
           setAuthError(err.message || 'Sign-in failed after redirect')
         }
-      })
+      }
+    }
 
     const unsub = onAuthStateChanged(auth, (u) => {
       if (cancelled) return
@@ -196,6 +208,8 @@ export function AppProvider({ children }) {
       }
     })
 
+    finishBootstrap()
+
     return () => {
       cancelled = true
       unsub()
@@ -213,6 +227,20 @@ export function AppProvider({ children }) {
     provider.addScope('email')
     provider.addScope('name')
     return signInWithOAuth(auth, provider, 'apple')
+  }, [])
+
+  const sendSignInEmail = useCallback(async (email) => {
+    setAuthError('')
+    await sendEmailSignInLink(auth, email)
+  }, [])
+
+  const completeEmailLink = useCallback(async (email) => {
+    setAuthError('')
+    const outcome = await finishEmailLinkSignIn(auth, email)
+    if (!outcome.ok && outcome.message) {
+      setAuthError(outcome.message)
+    }
+    return outcome
   }, [])
 
   const signOut = useCallback(async () => {
@@ -926,6 +954,8 @@ export function AppProvider({ children }) {
       authError,
       signInWithGoogle,
       signInWithApple,
+      sendSignInEmail,
+      completeEmailLink,
       signOut,
       syncFromCloud,
       syncState,
@@ -967,6 +997,8 @@ export function AppProvider({ children }) {
       authError,
       signInWithGoogle,
       signInWithApple,
+      sendSignInEmail,
+      completeEmailLink,
       signOut,
       syncFromCloud,
       syncState,

@@ -1,7 +1,8 @@
 import { initializeApp } from 'firebase/app'
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
-import { getAuth } from 'firebase/auth'
+import { initializeAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
+import { authPersistence } from './authSignIn.js'
 
 const config = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -22,6 +23,7 @@ let auth = null
 
 if (firebaseEnabled) {
   app = initializeApp(config)
+  auth = initializeAuth(app, { persistence: authPersistence })
 
   if (import.meta.env.DEV && import.meta.env.VITE_APP_CHECK_DEBUG_TOKEN) {
     self.FIREBASE_APPCHECK_DEBUG_TOKEN = import.meta.env.VITE_APP_CHECK_DEBUG_TOKEN
@@ -35,7 +37,6 @@ if (firebaseEnabled) {
   }
 
   db = getFirestore(app)
-  auth = getAuth(app)
 }
 
 export { db, auth, app }
