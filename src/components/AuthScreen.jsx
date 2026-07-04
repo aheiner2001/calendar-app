@@ -17,6 +17,7 @@ export default function AuthScreen() {
     signInWithApple,
     sendSignInEmail,
     completeEmailLink,
+    continueWithoutSignIn,
     theme,
     toggleTheme,
     authError,
@@ -242,6 +243,18 @@ export default function AuthScreen() {
 
         {displayError && <p className="auth-error">{displayError}</p>}
         {busy && <p className="auth-busy">Signing in…</p>}
+
+        <button
+          type="button"
+          className="auth-continue-local"
+          disabled={busy}
+          onClick={continueWithoutSignIn}
+        >
+          Continue without signing in
+        </button>
+        <p className="auth-hint auth-local-hint">
+          Your calendar stays on this device only. Sign in later from Sync to enable cloud backup.
+        </p>
 
         <p className="auth-hint">
           {inAppBrowser

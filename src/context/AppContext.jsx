@@ -37,6 +37,9 @@ import { eventsForDay } from '../lib/repeat.js'
 import {
   ACTIVE_CALENDAR_KEY,
   clearLegacyLocalData,
+  clearLocalSession,
+  enableLocalSession,
+  isLocalSession,
   loadLocalCalendars,
   loadLocalInvites,
   saveLocalCalendars,
@@ -74,16 +77,23 @@ export function AppProvider({ children }) {
   const [selectedDate, setSelectedDate] = useState(() => new Date())
   const [calendarView, setCalendarView] = useState(() => localStorage.getItem(VIEW_KEY) || 'day')
   const [settings, setSettings] = useState(loadSettings)
-  const [allEvents, setAllEvents] = useState([])
-  const [calendars, setCalendars] = useState([])
+  const [allEvents, setAllEvents] = useState(() =>
+    isLocalSession() || !firebaseEnabled ? loadLocalEvents('local') : [],
+  )
+  const [calendars, setCalendars] = useState(() =>
+    isLocalSession() || !firebaseEnabled ? loadLocalCalendars('local') : [],
+  )
   const [activeCalendarId, setActiveCalendarId] = useState(
     () => localStorage.getItem(ACTIVE_CALENDAR_KEY) || ALL_CALENDARS_ID,
   )
   const [user, setUser] = useState(null)
-  const [authLoading, setAuthLoading] = useState(firebaseEnabled)
+  const [localSession, setLocalSession] = useState(() => isLocalSession())
+  const [authLoading, setAuthLoading] = useState(firebaseEnabled && !isLocalSession())
   const [authError, setAuthError] = useState('')
-  const [syncState, setSyncState] = useState(firebaseEnabled ? 'syncing' : 'local')
-  const [cloudReady, setCloudReady] = useState(!firebaseEnabled)
+  const [syncState, setSyncState] = useState(
+    firebaseEnabled && !isLocalSession() ? 'syncing' : 'local',
+  )
+  const [cloudReady, setCloudReady] = useState(!firebaseEnabled || isLocalSession())
   const [syncError, setSyncError] = useState('')
   const [lastSynced, setLastSynced] = useState(null)
   const toastRef = useRef(null)
@@ -94,6 +104,8 @@ export function AppProvider({ children }) {
 
   const uid = user?.uid ?? 'local'
   const personalId = personalCalendarId(uid)
+  const isLocalMode = localSession || !firebaseEnabled
+  const useCloud = firebaseEnabled && user && !localSession
 
   const events = useMemo(
     () => filterEventsByCalendar(allEvents, activeCalendarId, personalId),
@@ -196,9 +208,18 @@ export function AppProvider({ children }) {
         setUser(u)
         setAuthLoading(false)
         if (u) {
+          clearLocalSession()
+          setLocalSession(false)
           setAuthError('')
           clearLegacyLocalData(u.uid)
           setCloudReady(true)
+          setSyncError('')
+        } else if (isLocalSession()) {
+          setLocalSession(true)
+          setCalendars(loadLocalCalendars('local'))
+          setAllEvents(loadLocalEvents('local'))
+          setCloudReady(true)
+          setSyncState('local')
           setSyncError('')
         } else {
           setAllEvents([])
@@ -247,11 +268,33 @@ export function AppProvider({ children }) {
     return outcome
   }, [])
 
+  const continueWithoutSignIn = useCallback(() => {
+    enableLocalSession()
+    setLocalSession(true)
+    setAuthLoading(false)
+    setAuthError('')
+    setCalendars(loadLocalCalendars('local'))
+    setAllEvents(loadLocalEvents('local'))
+    setSyncState('local')
+    setCloudReady(true)
+    setSyncError('')
+  }, [])
+
   const signOut = useCallback(async () => {
+    if (localSession && !auth?.currentUser) {
+      clearLocalSession()
+      setLocalSession(false)
+      setAllEvents([])
+      setCalendars([])
+      setSyncState(firebaseEnabled ? 'offline' : 'local')
+      return
+    }
     const uid = auth.currentUser?.uid
     if (uid) clearLegacyLocalData(uid)
+    clearLocalSession()
+    setLocalSession(false)
     await firebaseSignOut(auth)
-  }, [])
+  }, [localSession])
 
   const ensurePersonalCalendar = useCallback(async (u) => {
     const id = personalCalendarId(u.uid)
@@ -296,8 +339,8 @@ export function AppProvider({ children }) {
   }, [])
 
   const syncFromCloud = useCallback(async () => {
-    if (!firebaseEnabled || !user) {
-      throw new Error('Sign in with Google to sync from the cloud')
+    if (!useCloud) {
+      throw new Error('Sign in to sync from the cloud')
     }
 
     setSyncState('syncing')
@@ -386,13 +429,15 @@ export function AppProvider({ children }) {
   }, [calendars, activeCalendarId])
 
   useEffect(() => {
-    if (!firebaseEnabled) {
-      setCalendars(loadLocalCalendars('local'))
-      setAllEvents(loadLocalEvents('local'))
-      setCloudReady(true)
-      return
-    }
-    if (!user) return
+    if (!isLocalMode || user) return
+    setCalendars(loadLocalCalendars('local'))
+    setAllEvents(loadLocalEvents('local'))
+    setCloudReady(true)
+    setSyncState('local')
+  }, [isLocalMode, user])
+
+  useEffect(() => {
+    if (!useCloud) return
 
     let cancelled = false
     let unsubMember = () => {}
@@ -485,11 +530,11 @@ export function AppProvider({ children }) {
       unsubMember()
       unsubOwner()
     }
-  }, [user, ensurePersonalCalendar, acceptEmailInvites])
+  }, [user, ensurePersonalCalendar, acceptEmailInvites, useCloud])
 
   // Live event sync — one listener per calendar so shared events appear for all members.
   useEffect(() => {
-    if (!firebaseEnabled || !user) return
+    if (!useCloud) return
 
     const cals =
       calendars.length > 0 ? calendars : [defaultPersonalCalendar(user.uid)]
@@ -538,14 +583,13 @@ export function AppProvider({ children }) {
       cancelled = true
       unsubs.forEach((u) => u())
     }
-  }, [firebaseEnabled, user, calendars])
+  }, [useCloud, user, calendars])
 
   useEffect(() => {
-    if (!firebaseEnabled) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(allEvents))
-      saveLocalCalendars(calendars)
-    }
-  }, [allEvents, calendars])
+    if (!isLocalMode || user) return
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(allEvents))
+    saveLocalCalendars(calendars)
+  }, [allEvents, calendars, isLocalMode, user])
 
   const showToast = useCallback((msg) => {
     setToast(msg)
@@ -563,7 +607,7 @@ export function AppProvider({ children }) {
       const id = event.id || `evt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
       const calendarId = event.calendarId || writeCalendarId()
       const record = toFirestoreEvent(event, id, calendarId, uid)
-      if (firebaseEnabled) {
+      if (useCloud) {
         if (!user) throw new Error('Not signed in')
         pendingAddsRef.current.set(id, record)
         setAllEvents((prev) => (prev.some((e) => e.id === id) ? prev : [...prev, record]))
@@ -579,14 +623,14 @@ export function AppProvider({ children }) {
       }
       return record
     },
-    [user, uid, writeCalendarId],
+    [user, uid, writeCalendarId, useCloud],
   )
 
   const updateEvent = useCallback(
     async (event) => {
       const calendarId = event.calendarId || writeCalendarId()
       const record = toFirestoreEvent(event, event.id, calendarId, uid)
-      if (firebaseEnabled) {
+      if (useCloud) {
         if (!user) throw new Error('Not signed in')
         setAllEvents((prev) => prev.map((e) => (e.id === event.id ? record : e)))
         try {
@@ -598,14 +642,14 @@ export function AppProvider({ children }) {
         setAllEvents((prev) => prev.map((e) => (e.id === event.id ? record : e)))
       }
     },
-    [user, uid, writeCalendarId],
+    [user, uid, writeCalendarId, useCloud],
   )
 
   const deleteEvent = useCallback(
     async (id) => {
       pendingDeletesRef.current.add(id)
       setAllEvents((prev) => prev.filter((e) => e.id !== id))
-      if (firebaseEnabled) {
+      if (useCloud) {
         try {
           await deleteDoc(doc(db, 'events', id))
         } catch (err) {
@@ -614,7 +658,7 @@ export function AppProvider({ children }) {
         }
       }
     },
-    [user],
+    [user, useCloud],
   )
 
   const clearDay = useCallback(
@@ -630,7 +674,7 @@ export function AppProvider({ children }) {
       setAllEvents((prev) => prev.filter((e) => !ids.includes(e.id)))
 
       try {
-        if (firebaseEnabled) {
+        if (useCloud) {
           for (const id of ids) {
             await deleteDoc(doc(db, 'events', id))
           }
@@ -648,7 +692,7 @@ export function AppProvider({ children }) {
     async (name) => {
       const trimmed = name.trim() || 'Shared calendar'
       const shareCode = generateInviteCode()
-      if (!firebaseEnabled || !user) {
+      if (!useCloud) {
         const id = `shared-${Date.now()}`
         const cal = {
           id,
@@ -724,7 +768,7 @@ export function AppProvider({ children }) {
       }
 
       const shareCode = generateInviteCode()
-      if (!firebaseEnabled || !user) {
+      if (!useCloud) {
         setCalendars((prev) =>
           prev.map((c) => (c.id === calendarId ? { ...c, shareCode } : c)),
         )
@@ -771,7 +815,7 @@ export function AppProvider({ children }) {
         email: email.trim().toLowerCase() || null,
         expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
       }
-      if (!firebaseEnabled || !user) {
+      if (!useCloud) {
         const invites = loadLocalInvites()
         invites.push({ id: `inv-${Date.now()}`, ...invite })
         saveLocalInvites(invites)
@@ -789,8 +833,25 @@ export function AppProvider({ children }) {
       const code = rawCode.trim().toUpperCase()
       if (!code) throw new Error('Enter an invite code')
 
-      if (!firebaseEnabled || !user) {
-        throw new Error('Sign in with Google to join a shared calendar')
+      if (!useCloud) {
+        const invites = loadLocalInvites()
+        const inv = invites.find((i) => i.code === code)
+        if (!inv) throw new Error('Invalid invite code')
+        if (inv.expiresAt && inv.expiresAt < Date.now()) throw new Error('Invite expired')
+        const cal = calendars.find((c) => c.id === inv.calendarId)
+        if (!cal) throw new Error('Calendar no longer exists')
+        if (cal.type !== 'shared') throw new Error('Not a shared calendar')
+        const members = Array.isArray(cal.members) ? [...cal.members] : []
+        if (!members.includes(uid)) members.push(uid)
+        const joinedCal = { ...cal, members }
+        setCalendars((prev) => {
+          if (prev.some((c) => c.id === joinedCal.id)) {
+            return prev.map((c) => (c.id === joinedCal.id ? joinedCal : c))
+          }
+          return [...prev, joinedCal]
+        })
+        setActiveCalendarId(joinedCal.id)
+        return joinedCal.name
       }
 
       let calRef = null
@@ -884,7 +945,7 @@ export function AppProvider({ children }) {
         if (activeCalendarId === calendarId) setActiveCalendarId(ALL_CALENDARS_ID)
       }
 
-      if (!firebaseEnabled || !user) {
+      if (!useCloud) {
         if (isOwner) {
           setCalendars((prev) => prev.filter((c) => c.id !== calendarId))
           setAllEvents((prev) => prev.filter((e) => e.calendarId !== calendarId))
@@ -960,6 +1021,7 @@ export function AppProvider({ children }) {
       signInWithApple,
       sendSignInEmail,
       completeEmailLink,
+      continueWithoutSignIn,
       signOut,
       syncFromCloud,
       syncState,
@@ -967,6 +1029,8 @@ export function AppProvider({ children }) {
       cloudReady,
       syncError,
       firebaseEnabled,
+      localSession,
+      isLocalMode,
       toast,
       showToast,
     }),
@@ -1003,12 +1067,16 @@ export function AppProvider({ children }) {
       signInWithApple,
       sendSignInEmail,
       completeEmailLink,
+      continueWithoutSignIn,
       signOut,
       syncFromCloud,
       syncState,
       lastSynced,
       cloudReady,
       syncError,
+      firebaseEnabled,
+      localSession,
+      isLocalMode,
       toast,
       showToast,
     ],

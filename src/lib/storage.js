@@ -16,7 +16,32 @@ const VIEW_KEY = 'calendar-view'
 const CALENDARS_KEY = 'calendar-calendars'
 const INVITES_KEY = 'calendar-invites'
 const ACTIVE_CALENDAR_KEY = 'calendar-active-id'
+const LOCAL_SESSION_KEY = 'area-book-local-session'
 const KNOWN_CALENDAR_IDS_KEY = 'calendar-known-ids'
+
+function isLocalSession() {
+  try {
+    return localStorage.getItem(LOCAL_SESSION_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function enableLocalSession() {
+  try {
+    localStorage.setItem(LOCAL_SESSION_KEY, '1')
+  } catch {
+    /* private mode */
+  }
+}
+
+function clearLocalSession() {
+  try {
+    localStorage.removeItem(LOCAL_SESSION_KEY)
+  } catch {
+    /* ignore */
+  }
+}
 
 function cloudCalendarsKey(uid) {
   return `${CALENDARS_KEY}-${uid}`
@@ -142,6 +167,10 @@ export {
   CALENDARS_KEY,
   INVITES_KEY,
   ACTIVE_CALENDAR_KEY,
+  LOCAL_SESSION_KEY,
+  isLocalSession,
+  enableLocalSession,
+  clearLocalSession,
   loadLocalCalendars,
   saveLocalCalendars,
   clearLegacyLocalData,

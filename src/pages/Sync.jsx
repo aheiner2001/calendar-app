@@ -7,6 +7,8 @@ import { TrashIcon } from '../components/icons.jsx'
 export default function Sync() {
   const {
     firebaseEnabled,
+    localSession,
+    isLocalMode,
     calendars,
     activeCalendarId,
     setActiveCalendarId,
@@ -149,6 +151,21 @@ export default function Sync() {
   return (
     <div className="page">
       <div className="share-page">
+        {localSession && !user && (
+          <div className="share-profile">
+            <div className="share-avatar" aria-hidden="true">
+              L
+            </div>
+            <div className="share-profile-info">
+              <div className="share-profile-name">Local mode</div>
+              <div className="share-profile-email">Data saved on this device only</div>
+            </div>
+            <button type="button" className="btn btn-ghost share-signout" onClick={signOut}>
+              Sign out
+            </button>
+          </div>
+        )}
+
         {firebaseEnabled && user && (
           <div className="share-profile">
             <div className="share-avatar" aria-hidden="true">
@@ -170,7 +187,16 @@ export default function Sync() {
           </div>
         )}
 
-        {firebaseEnabled && !user && (
+        {localSession && !user && (
+          <div className="sync-callout">
+            <p>You&apos;re using the app locally. Sign in below to sync calendars across devices.</p>
+            <button type="button" className="btn btn-primary" onClick={signInWithGoogle}>
+              Sign in with Google
+            </button>
+          </div>
+        )}
+
+        {firebaseEnabled && !user && !localSession && (
           <div className="sync-callout">
             <p>Sign in to create shared calendars and link with others.</p>
             <button type="button" className="btn btn-primary" onClick={signInWithGoogle}>
@@ -210,7 +236,7 @@ export default function Sync() {
           </div>
         )}
 
-        {(firebaseEnabled && user) || !firebaseEnabled ? (
+        {(firebaseEnabled && user) || isLocalMode ? (
           <>
             <div className="home-section-title">My calendars</div>
             {calendars.length === 0 ? (
